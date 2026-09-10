@@ -56,7 +56,7 @@ features for PV, EV, batteries or heat pumps are separate downstream tasks.
 From the repository root in Renku, run:
 
 ```sh
-python3 -u backend/scripts/fetch_weather.py --end 2026-07-31 --output /home/renku/work/store/weather_era5
+python3 -u backend/scripts/fetch_weather.py --end 2026-07-31 --workers 4 --output /home/renku/work/store/weather_era5
 ```
 
 The example covers January 2023 through July 2026, matching the displayed input
@@ -118,8 +118,20 @@ per output directory. Changing dates, variables or PLZ selection requires a
 different output directory; do not combine overlapping runs into one table
 without checking for duplicate keys.
 
-API requests are sequential, paced at roughly one counted call unit per second,
-and stopped before exceeding a local rolling budget of 9,000 units in 24 hours.
+Up to four blocks are processed concurrently by default (`--workers 1` through
+`--workers 8`). All threads share one synchronized request budget: request starts
+are paced at roughly one counted call unit per second and stopped before
+exceeding a local rolling budget of 9,000 units in 24 hours. More workers overlap
+network/storage latency; they do not increase the API quota. Stop the old process
+before restarting with a different worker count. Previously downloaded blocks
+remain compatible, and changing only `--workers` needs no new output directory.
+
+Progress reports show total block time, API plus quota-wait time, and output-write
+plus checksum time. Total time also includes cache lookup, validation and receipt
+writing, so a large unaccounted remainder can indicate slow mounted storage.
+On an error or interruption, new work is stopped and already active requests are
+allowed to finish; an active request may take up to its 90-second network timeout.
+
 A month counts conservatively as up to three units, not one request. The full
 multi-year collection can therefore require more than one day of free quota.
 HTTP 429 stops the run and saves the server cooldown; transient network/server

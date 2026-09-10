@@ -4,14 +4,16 @@ import io
 import json
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from threading import Barrier, Lock
 from unittest.mock import patch
 from urllib.error import HTTPError
 from zipfile import ZipFile
 
 from scripts.fetch_weather import (
-    COLUMNS, POSTCODES, VARIABLES, RequestBudget, collect_month, get_bytes,
+    COLUMNS, POSTCODES, VARIABLES, RequestBudget, collect_month, collect_parallel, get_bytes,
     locate_postcodes, main, month_windows, weather_rows,
 )
 
@@ -112,6 +114,8 @@ class WeatherTests(unittest.TestCase):
         with patch("scripts.fetch_weather.get_bytes", return_value=json.dumps(payload).encode()) as download:
             receipt, cached = collect_month(self.root, location, start, end, None)
             self.assertFalse(cached)
+            self.assertGreaterEqual(receipt["timing_seconds"]["api_and_quota"], 0)
+            self.assertGreaterEqual(receipt["timing_seconds"]["file_and_checksum"], 0)
             self.assertEqual(receipt["missing_values"]["shortwave_radiation"], 1)
             second, cached = collect_month(self.root, location, start, end, None)
             self.assertTrue(cached)
@@ -124,6 +128,12 @@ class WeatherTests(unittest.TestCase):
             self.assertEqual(header, COLUMNS)
             self.assertEqual(first[4], "")
             self.assertEqual(second[4], "0.0")
+            receipt_path = target.with_suffix("").with_suffix(".json")
+            old_receipt = json.loads(receipt_path.read_text())
+            del old_receipt["timing_seconds"]
+            receipt_path.write_text(json.dumps(old_receipt))
+            self.assertTrue(collect_month(self.root, location, start, end, None)[1])
+            download.assert_called_once()
             target.write_bytes(b"interrupted write")
             self.assertFalse(collect_month(self.root, location, start, end, None)[1])
             self.assertEqual(download.call_count, 2)
@@ -156,6 +166,69 @@ class WeatherTests(unittest.TestCase):
             RequestBudget(path).reserve(3)
             wait.assert_called_once_with(3)
 
+    def test_concurrent_workers_share_pacing_and_persist_every_reservation(self):
+        path = self.root / "api_usage.json"
+        budget = RequestBudget(path)
+        clock = [100000.0]
+
+        def advance(seconds):
+            clock[0] += seconds
+
+        with patch("scripts.fetch_weather.time.time", side_effect=lambda: clock[0]), patch("scripts.fetch_weather.time.sleep", side_effect=advance):
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                list(executor.map(budget.reserve, [3] * 8))
+        calls = json.loads(path.read_text())["calls"]
+        self.assertEqual([call["time"] for call in calls], [100000 + 3 * index for index in range(8)])
+        self.assertEqual(sum(call["units"] for call in calls), 24)
+
+    def test_cancellation_during_pacing_does_not_reserve_another_request(self):
+        budget = RequestBudget(self.root / "api_usage.json")
+        with patch("scripts.fetch_weather.time.time", return_value=100000):
+            budget.reserve(3)
+            with patch("scripts.fetch_weather.time.sleep", side_effect=lambda seconds: budget.stop()):
+                with self.assertRaisesRegex(RuntimeError, "Download stopped"):
+                    budget.reserve(3)
+        self.assertEqual(len(budget.state["calls"]), 1)
+
+    def test_parallel_blocks_overlap_with_bounded_worker_count(self):
+        barrier = Barrier(4)
+        lock = Lock()
+        active = peak = 0
+        start = end = date(2023, 1, 1)
+        jobs = [({"PLZ": postcode}, start, end) for postcode in POSTCODES[:8]]
+
+        def collect(output, location, start, end, budget):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            barrier.wait(timeout=5)
+            with lock:
+                active -= 1
+            return {"PLZ": location["PLZ"]}, False
+
+        with patch("scripts.fetch_weather.collect_month", side_effect=collect):
+            results = list(collect_parallel(self.root, jobs, RequestBudget(self.root / "api_usage.json"), 4))
+        self.assertEqual(peak, 4)
+        self.assertEqual({receipt["PLZ"] for receipt, cached, elapsed in results}, set(POSTCODES[:8]))
+
+    def test_failed_job_stops_submitting_more_work(self):
+        budget = RequestBudget(self.root / "api_usage.json")
+        start = end = date(2023, 1, 1)
+        jobs = [({"PLZ": postcode}, start, end) for postcode in POSTCODES[:8]]
+        with patch("scripts.fetch_weather.collect_month", side_effect=RuntimeError("API failed")) as collect:
+            with self.assertRaisesRegex(RuntimeError, "API failed"):
+                list(collect_parallel(self.root, jobs, budget, 1))
+        collect.assert_called_once()
+        self.assertTrue(budget.stopped.is_set())
+
+    def test_cooldowns_cannot_shorten_each_other(self):
+        budget = RequestBudget(self.root / "api_usage.json")
+        with patch("scripts.fetch_weather.time.time", return_value=100000):
+            budget.defer(86400)
+            budget.defer(60)
+        self.assertEqual(budget.state["not_before"], 186400)
+
     def test_429_stops_without_retrying_and_saves_cooldown(self):
         budget = RequestBudget(self.root / "api_usage.json")
         error = HTTPError("https://example.test", 429, "Rate limit", {"Retry-After": "120"}, io.BytesIO(b"limit"))
@@ -180,6 +253,7 @@ class WeatherTests(unittest.TestCase):
         self.assertEqual(totals["rows"], 24)
         with patch("scripts.fetch_weather.get_bytes", side_effect=AssertionError("Must use cache")), patch("sys.stdout", io.StringIO()):
             self.assertEqual(main(arguments), 0)
+            self.assertEqual(main([*arguments, "--workers", "1"]), 0)
             self.assertEqual(main(["--start", str(start), "--plz", "4302", "--output", str(self.root)]), 0)
         with patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
             main([*arguments, "--end", "2023-01-02"])
