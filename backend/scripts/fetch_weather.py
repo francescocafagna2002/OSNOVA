@@ -10,9 +10,12 @@ import json
 import math
 import sys
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from itertools import islice
 from pathlib import Path
+from threading import Event, Lock
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -72,23 +75,35 @@ class RequestBudget:
     def __init__(self, path):
         self.path = path
         self.state = json.loads(path.read_text()) if path.exists() else {"calls": [], "not_before": 0}
+        self.lock = Lock()
+        self.stopped = Event()
 
     def reserve(self, units):
-        now = time.time()
-        calls = [call for call in self.state["calls"] if call["time"] > now - 86400]
-        if now < self.state["not_before"]:
-            raise RuntimeError("API cooldown is active. Retry later with the same output directory.")
-        if sum(call["units"] for call in calls) + units > 9000:
-            raise RuntimeError("Rolling 24-hour API budget reached. Retry tomorrow with the same command.")
-        if calls:
-            time.sleep(max(0, calls[-1]["time"] + calls[-1]["units"] - now))
-        calls.append({"time": time.time(), "units": units})
-        self.state["calls"] = calls
-        write_json(self.path, self.state)
+        with self.lock:
+            if self.stopped.is_set():
+                raise RuntimeError("Download stopped; no new API requests will start.")
+            now = time.time()
+            calls = [call for call in self.state["calls"] if call["time"] > now - 86400]
+            if now < self.state["not_before"]:
+                raise RuntimeError("API cooldown is active. Retry later with the same output directory.")
+            if sum(call["units"] for call in calls) + units > 9000:
+                raise RuntimeError("Rolling 24-hour API budget reached. Retry tomorrow with the same command.")
+            if calls:
+                time.sleep(max(0, calls[-1]["time"] + calls[-1]["units"] - now))
+            if self.stopped.is_set():
+                raise RuntimeError("Download stopped; no new API requests will start.")
+            calls.append({"time": time.time(), "units": units})
+            self.state["calls"] = calls
+            write_json(self.path, self.state)
 
     def defer(self, seconds):
-        self.state["not_before"] = time.time() + seconds
-        write_json(self.path, self.state)
+        self.stop()
+        with self.lock:
+            self.state["not_before"] = max(self.state["not_before"], time.time() + seconds)
+            write_json(self.path, self.state)
+
+    def stop(self):
+        self.stopped.set()
 
 
 def get_bytes(url, budget=None, units=1):
@@ -100,7 +115,8 @@ def get_bytes(url, budget=None, units=1):
             with urlopen(request, timeout=90) as response:
                 return response.read()
         except HTTPError as error:
-            reason = error.read(4096).decode("utf-8", errors="replace")
+            with error:
+                reason = error.read(4096).decode("utf-8", errors="replace")
             if error.code == 429:
                 retry_after = error.headers.get("Retry-After", "86400")
                 try:
@@ -211,10 +227,12 @@ def collect_month(output, location, start, end, budget):
                 return receipt, True
         except (ValueError, KeyError):
             pass
+    api_started = time.perf_counter()
     payload = json.loads(get_bytes(
         ARCHIVE_URL + "?" + urlencode(params), budget,
         units=math.ceil(((end - start).days + 1) / 14) * max(1, math.ceil(len(VARIABLES) / 10)),
     ))
+    api_seconds = time.perf_counter() - api_started
     rows = list(weather_rows(payload, postcode, start, end))
     receipt = {
         "PLZ": postcode, "request": params, "rows": len(rows),
@@ -228,14 +246,47 @@ def collect_month(output, location, start, end, budget):
     }
     if any(count == len(rows) for count in receipt["missing_values"].values()):
         raise ValueError(f"An entire variable is missing for PLZ {postcode}, {start:%Y-%m}")
+    file_started = time.perf_counter()
     receipt_path.unlink(missing_ok=True)
     with gzip.open(target, "wt", encoding="utf-8", newline="", compresslevel=6) as destination:
         writer = csv.writer(destination, lineterminator="\n")
         writer.writerow(COLUMNS)
         writer.writerows(rows)
     receipt["sha256"] = file_digest(target)
+    receipt["timing_seconds"] = {
+        "api_and_quota": round(api_seconds, 3),
+        "file_and_checksum": round(time.perf_counter() - file_started, 3),
+    }
     write_json(receipt_path, receipt)
     return receipt, False
+
+
+def collect_job(output, job, budget):
+    started = time.perf_counter()
+    location, start, end = job
+    receipt, cached = collect_month(output, location, start, end, budget)
+    return receipt, cached, time.perf_counter() - started
+
+
+def collect_parallel(output, jobs, budget, workers):
+    remaining = iter(jobs)
+    executor = ThreadPoolExecutor(max_workers=workers)
+    pending = set()
+    try:
+        for job in islice(remaining, workers):
+            pending.add(executor.submit(collect_job, output, job, budget))
+        while pending:
+            finished, pending = wait(pending, return_when=FIRST_COMPLETED)
+            results = [future.result() for future in finished]
+            for result in results:
+                yield result
+            for job in islice(remaining, len(finished)):
+                pending.add(executor.submit(collect_job, output, job, budget))
+    finally:
+        budget.stop()
+        for future in pending:
+            future.cancel()
+        executor.shutdown(wait=True, cancel_futures=True)
 
 
 def default_output():
@@ -252,6 +303,8 @@ def main(argv=None):
     parser.add_argument("--output", type=Path, default=default_output())
     parser.add_argument("--plz", nargs="+", default=POSTCODES, choices=POSTCODES,
                         help="Optional subset for a short smoke test")
+    parser.add_argument("--workers", type=int, choices=range(1, 9), default=4,
+                        help="Concurrent blocks (default: 4); all workers share one API quota")
     args = parser.parse_args(argv)
     output = args.output.expanduser().resolve()
     metadata_path = output / "metadata.json"
@@ -311,15 +364,19 @@ def main(argv=None):
     jobs = [(location, start, stop) for start, stop in month_windows(args.start, end) for location in locations]
     budget = RequestBudget(output / "api_usage.json")
     totals = {"rows": 0, "blocks": len(jobs), "missing_values": dict.fromkeys(VARIABLES, 0)}
+    workers = min(args.workers, len(jobs))
     print(f"PLZ: {len(locations)} | UTC: {args.start} through {end} | Model: {MODEL}", flush=True)
-    print(f"Output: {output}\nOne request at a time; automatic quota control; rerun to resume.", flush=True)
-    for index, (location, start, stop) in enumerate(jobs, 1):
-        receipt, cached = collect_month(output, location, start, stop, budget)
+    print(f"Output: {output}\nWorkers: {workers}; shared quota control; rerun to resume.", flush=True)
+    for index, (receipt, cached, elapsed) in enumerate(collect_parallel(output, jobs, budget, workers), 1):
         totals["rows"] += receipt["rows"]
         for variable in VARIABLES:
             totals["missing_values"][variable] += receipt["missing_values"][variable]
-        print(f"[{index}/{len(jobs)}] {'CACHED' if cached else 'SAVED'} PLZ={location['PLZ']} "
-              f"{start:%Y-%m} hours={receipt['rows']}", flush=True)
+        details = ""
+        if not cached:
+            timing = receipt["timing_seconds"]
+            details = f" api+quota={timing['api_and_quota']:.1f}s file+checksum={timing['file_and_checksum']:.1f}s"
+        print(f"[{index}/{len(jobs)}] {'CACHED' if cached else 'SAVED'} PLZ={receipt['PLZ']} "
+              f"{receipt['request']['start_date'][:7]} hours={receipt['rows']} total={elapsed:.1f}s{details}", flush=True)
     expected_rows = ((end - args.start).days + 1) * 24 * len(locations)
     if totals["rows"] != expected_rows:
         raise ValueError("Unexpected total row count")
