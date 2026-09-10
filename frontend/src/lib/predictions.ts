@@ -29,14 +29,29 @@ export type AssetMeta = {
   shortLabel: string;
   icon: LucideIcon;
   color: string;
+  pillBackground: string;
 };
 
 /** Fixed display order: PV, Battery, Heat pump, EV. */
 export const ASSETS: readonly AssetMeta[] = [
-  { key: "pv", label: "PV / Solar", shortLabel: "PV", icon: Sun, color: "#d97706" },
-  { key: "battery", label: "Battery", shortLabel: "Battery", icon: BatteryCharging, color: "#16a34a" },
-  { key: "heatPump", label: "Heat pump", shortLabel: "Heat pump", icon: Flame, color: "#ea580c" },
-  { key: "ev", label: "Electric vehicle", shortLabel: "EV", icon: Car, color: "#2563eb" },
+  { key: "pv", label: "PV / Solar", shortLabel: "PV", icon: Sun, color: "#EFA33A", pillBackground: "#FFF7E8" },
+  {
+    key: "battery",
+    label: "Battery",
+    shortLabel: "Battery",
+    icon: BatteryCharging,
+    color: "#39A85A",
+    pillBackground: "#EFF8F1",
+  },
+  {
+    key: "heatPump",
+    label: "Heat pump",
+    shortLabel: "Heat pump",
+    icon: Flame,
+    color: "#E85B2A",
+    pillBackground: "#FFF2ED",
+  },
+  { key: "ev", label: "Electric vehicle", shortLabel: "EV", icon: Car, color: "#2563EB", pillBackground: "#EFF4FF" },
 ];
 
 export const ASSET_BY_KEY = Object.fromEntries(ASSETS.map((asset) => [asset.key, asset])) as Record<
