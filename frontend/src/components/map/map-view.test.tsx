@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -116,6 +116,15 @@ describe("MapView", () => {
     useUIStore.getState().selectPlz("5400");
     await clickWith([]);
     expect(useUIStore.getState().selectedPlz).toBeNull();
+  });
+
+  it("clears the tooltip when the pointer leaves the map container", async () => {
+    renderWithProviders(<MapView />);
+    await waitFor(() => expect(mapMock.props.onMouseMove).toBeTypeOf("function"));
+    await act(() => (mapMock.props.onMouseMove as Handler)({ features: [feature("5000", 2)], point: { x: 40, y: 50 } }));
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+    fireEvent.mouseLeave(screen.getByTestId("map-view"));
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
   it("shows a tooltip with the building count while hovering a PLZ", async () => {
