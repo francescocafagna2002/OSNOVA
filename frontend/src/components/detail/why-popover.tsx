@@ -28,13 +28,13 @@ export function WhyPopover({ assetKey, probability, explanation }: WhyPopoverPro
     <Popover>
       <PopoverTrigger
         aria-label={`Why ${meta.shortLabel}?`}
-        className="text-[13px] font-medium text-primary hover:text-navy hover:underline"
+        className="text-[13px] font-medium text-primary hover:text-navy hover:underline focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:outline-none"
       >
         Why?
       </PopoverTrigger>
       <PopoverContent
         align="end"
-        className="w-72 rounded-[12px] border border-border p-3.5 shadow-[0_4px_16px_rgba(20,40,60,0.10)] ring-0"
+        className="w-72 rounded-[12px] border border-border p-4 shadow-[0_4px_16px_rgba(20,40,60,0.10)] ring-0"
       >
         <div className="font-serif text-[15px] font-semibold text-navy">
           Why {meta.shortLabel} is {label}
