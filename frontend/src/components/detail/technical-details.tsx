@@ -12,11 +12,11 @@ type TechnicalDetailsProps = { explanation: BuildingExplanation; predictions: As
 export function TechnicalDetails({ explanation, predictions }: TechnicalDetailsProps) {
   return (
     <Collapsible>
-      <CollapsibleTrigger className="group flex items-center gap-1 text-sm font-medium text-primary hover:underline">
+      <CollapsibleTrigger className="group flex items-center gap-1 text-sm font-medium text-primary hover:text-navy hover:underline">
         Show technical details
         <ChevronDown className="size-4 transition-transform group-data-[panel-open]:rotate-180" aria-hidden />
       </CollapsibleTrigger>
-      <CollapsibleContent className="mt-3 space-y-4 text-sm">
+      <CollapsibleContent className="mt-3 space-y-4 rounded-2xl bg-[#F6F9FB] p-4 text-sm">
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
           <dt className="text-muted-foreground">Model</dt>
           <dd>{explanation.model}</dd>
@@ -31,7 +31,7 @@ export function TechnicalDetails({ explanation, predictions }: TechnicalDetailsP
         </dl>
         <div className="grid gap-3 sm:grid-cols-2">
           {ASSETS.map((asset) => (
-            <div key={asset.key} className="rounded-lg bg-muted/50 p-3">
+            <div key={asset.key} className="rounded-lg border border-border bg-white p-3">
               <div className="mb-1.5 text-xs font-semibold">
                 {asset.shortLabel} prediction: {formatProbability(predictions[asset.key])}
               </div>
