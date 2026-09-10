@@ -26,6 +26,11 @@ export function plzFilter(plz: string | null): ExpressionSpecification {
   return ["==", ["get", "plz"], plz ?? NO_MATCH];
 }
 
+/** The highlight already tints its zone in AEW blue; the hover tint on top over-darkens it. */
+export function plzHoverFilter(hoveredPlz: string | null, highlightedPlz: string | null): ExpressionSpecification {
+  return plzFilter(hoveredPlz === highlightedPlz ? null : hoveredPlz);
+}
+
 type PlzLayersProps = {
   data: FeatureCollection<Polygon, PlzCountProperties>;
   highlightedPlz: string | null;
@@ -39,7 +44,7 @@ export function PlzLayers({ data, highlightedPlz, hoveredPlz }: PlzLayersProps) 
       <Layer
         id="plz-hover"
         type="fill"
-        filter={plzFilter(hoveredPlz)}
+        filter={plzHoverFilter(hoveredPlz, highlightedPlz)}
         paint={{
           "fill-color": MAP.plzHover,
           "fill-opacity": HOVER_OPACITY,
