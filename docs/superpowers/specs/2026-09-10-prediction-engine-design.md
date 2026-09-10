@@ -177,7 +177,7 @@ Rule-based detectors on the full multi-year series of a meter (numpy per meter, 
 
 Detectors:
 
-- **EV sessions** — baseline = rolling median of `import_kw` over 2 h; residual = import − baseline; a session is a run of residual ≥ threshold for ≥ 3 intervals with plateau CV ≤ 0.25; confidence from plateau flatness and plateau level proximity to 3.7/7/11 kW. Sessions also feed the EV features (same code, one truth).
+- **EV sessions** — baseline = centred rolling median of `import_kw` over 8 h (a session must be shorter than half the window, otherwise the median absorbs it); residual = import − baseline; a session is a run of residual ≥ threshold for ≥ 3 intervals with plateau CV ≤ 0.25; confidence from plateau flatness and plateau level proximity to 3.7/7/11 kW. Sessions also feed the EV features (same code, one truth).
 - **PV generation** — on days with export: window from first to last interval with `export_kw > 0.1` or, without export channel, the contiguous midday interval where net < 0.5 × night baseline on a sunny day. Confidence from radiation correlation that day.
 - **Heat-pump heating** — winter days: intervals where import exceeds the summer-night baseline by ≥ 0.8 kW with a cycling pattern (≥ 3 on/off transitions in 3 h) or a sustained morning block; confidence from the meter-year `hdd_slope`.
 - **Battery cycle** — sunny days on meters with `export_present`: the morning block where net ≈ 0 while radiation rises (charging) and the evening block where net ≈ 0 while the typical evening peak is expected (discharging). Confidence from `evening_import_sunny_vs_cloudy`.
