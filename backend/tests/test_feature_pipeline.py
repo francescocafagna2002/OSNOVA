@@ -142,5 +142,39 @@ class FeaturePipelineSynthTests(unittest.TestCase):
             self.assertEqual(df2.height, 5)
 
 
+class CliEntrypointTests(unittest.TestCase):
+    """Exercises scripts/build_feature_dataset.py's main() directly.
+
+    The tests above call run_pipeline() straight from feature_pipeline and
+    never touch argparse/main() wiring — that's exactly the code path where a
+    bug (an undefined `defaults` reference) shipped and slipped past them.
+    """
+
+    def test_main_runs_end_to_end_with_cli_args(self):
+        from scripts.build_feature_dataset import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_dir = root / "input"
+            generate(input_dir, n_buildings=6, days=10, start=dt.date(2024, 1, 1), seed=3, quiet=True)
+            output_dir = root / "output"
+
+            exit_code = main(
+                [
+                    "--raw-consumption-dir", str(input_dir),
+                    "--mp-mapping-file", str(input_dir / "mpid_zähler_mapping.csv"),
+                    "--zaehler-gp-file", str(input_dir / "Zähler-GP.csv"),
+                    "--labels-file", str(input_dir / "HackDays2026 - GIGI.csv"),
+                    "--weather-dir", str(input_dir / "weather"),
+                    "--output-dir", str(output_dir),
+                    "--limit-buildings", "6",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            df = pl.read_parquet(output_dir / "feature_dataset.parquet")
+            self.assertEqual(df.height, 6)
+
+
 if __name__ == "__main__":
     unittest.main()
