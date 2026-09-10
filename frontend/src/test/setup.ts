@@ -40,3 +40,7 @@ if (!Element.prototype.scrollIntoView) {
 if (!Element.prototype.getAnimations) {
   Element.prototype.getAnimations = () => [];
 }
+
+// zrender measures text via canvas even in SVG render mode; jsdom has no canvas backend.
+HTMLCanvasElement.prototype.getContext = (() =>
+  null) as typeof HTMLCanvasElement.prototype.getContext;
