@@ -40,6 +40,7 @@ function plzFeatureAt(event: MapLayerMouseEvent): PlzCountProperties | undefined
 
 export function MapView() {
   const mapRef = useRef<MapRef>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const counts = usePlzCounts();
   const highlightedPlz = useHighlightedPlz();
   const selectedPlz = useUIStore((s) => s.selectedPlz);
@@ -141,7 +142,12 @@ export function MapView() {
   }, []);
 
   return (
-    <div className="relative h-full w-full bg-background" data-testid="map-view">
+    <div
+      ref={containerRef}
+      className="relative h-full w-full overflow-hidden bg-background"
+      data-testid="map-view"
+      onMouseLeave={clearHover}
+    >
       {mapStyle !== null && (
         <Map
           ref={mapRef}
@@ -160,7 +166,13 @@ export function MapView() {
           <PlzLayers data={data} highlightedPlz={highlightedPlz} hoveredPlz={hover?.plz ?? null} />
         </Map>
       )}
-      <MapTooltip plz={hover?.plz ?? null} count={hover?.count ?? 0} x={hover?.x ?? 0} y={hover?.y ?? 0} />
+      <MapTooltip
+        plz={hover?.plz ?? null}
+        count={hover?.count ?? 0}
+        x={hover?.x ?? 0}
+        y={hover?.y ?? 0}
+        containerWidth={containerRef.current?.clientWidth}
+      />
     </div>
   );
 }
