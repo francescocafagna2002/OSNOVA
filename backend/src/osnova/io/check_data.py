@@ -285,29 +285,93 @@ def _asset_counts(t2: pl.DataFrame) -> dict[str, int]:
 # --------------------------------------------------------------------------- weather
 
 
+WEATHER_MARKER = "temperature_2m"  # a weather CSV is any csv/csv.gz whose header has this column
+WEATHER_TIME_COLS = ("timestamp_utc", "time", "timestamp", "datetime", "date")
+
+
+def find_weather_files(weather_dir: Path) -> list[Path]:
+    """Weather CSVs at any depth (`open-meteo_<plz>.csv` or `weather_part_N/hourly/<plz>/<YYYY-MM>.csv.gz`).
+
+    Recognised by header, so `plz_coordinates.csv`, zips and JSON sidecars are ignored.
+    """
+    if not weather_dir.exists():
+        return []
+    out: list[Path] = []
+    for p in sorted(weather_dir.rglob("*")):
+        if p.is_file() and (p.name.endswith(".csv") or p.name.endswith(".csv.gz")):
+            if WEATHER_MARKER in _first_line(p):
+                out.append(p)
+    return out
+
+
+def _read_weather(path: Path) -> pl.DataFrame:
+    return pl.read_csv(path, infer_schema_length=0, encoding="utf8-lossy")  # gz is transparent
+
+
+def _plz_of_weather_file(path: Path, df: pl.DataFrame | None) -> str | None:
+    if path.parent.name.isdigit():
+        return path.parent.name  # hourly/<plz>/<month>.csv.gz
+    if df is not None:
+        col = next((c for c in df.columns if c.lower() == "plz"), None)
+        if col is not None and df.height:
+            return str(df[col][0]).strip()
+    m = re.search(r"(?<!\d)(\d{4})(?!\d)", path.name.split(".")[0])
+    return m.group(1) if m else None
+
+
+def _parse_times(s: pl.Series) -> pl.Series:
+    ts = s.str.strip_chars().str.to_datetime(time_unit="ms", strict=False)
+    if ts.dtype.time_zone is not None:  # type: ignore[union-attr]
+        ts = ts.dt.convert_time_zone("UTC").dt.replace_time_zone(None)
+    return ts.drop_nulls()
+
+
 def _check_weather(weather_dir: Path, plz_in_table1: list[str]) -> dict[str, Any]:
-    files = sorted(p for p in weather_dir.glob("*.csv") if p.is_file()) if weather_dir.exists() else []
-    out: dict[str, Any] = {"dir": str(weather_dir), "files": [p.name for p in files], "columns": []}
-    plz_with_weather: set[str] = set()
-    hour_gaps = 0
-    for i, p in enumerate(files):
-        df = pl.read_csv(p, infer_schema_length=0, encoding="utf8-lossy")
-        if i == 0:
-            out["columns"] = df.columns
-            out["rows_first_file"] = df.height
-            tcol = next((c for c in df.columns if c.lower() in ("time", "datetime", "date")), None)
-            if tcol:
-                ts = df[tcol].str.strptime(pl.Datetime("ms"), "%Y-%m-%dT%H:%M", strict=False).drop_nulls()
-                out["time_min"], out["time_max"] = str(ts.min()), str(ts.max())
-                if ts.len() > 1:
-                    hour_gaps = int((ts.sort().diff().drop_nulls() != timedelta(hours=1)).sum())
-        if "plz" in df.columns:
-            plz_with_weather |= {v.strip() for v in df["plz"].drop_nulls().unique()}
-        else:
-            m = re.search(r"(\d{4})", p.stem)
-            if m:
-                plz_with_weather.add(m.group(1))
-    out["hour_gaps"] = hour_gaps
+    files = find_weather_files(weather_dir)
+    out: dict[str, Any] = {"dir": str(weather_dir), "n_files": len(files), "columns": []}
+    out["parts"] = {
+        d.name: {
+            "success_marker": (d / "_SUCCESS.json").exists(),
+            "metadata": (d / "metadata.json").exists(),
+            "n_plz_dirs": len([q for q in (d / "hourly").glob("*") if q.is_dir()])
+            if (d / "hourly").exists()
+            else 0,
+        }
+        for d in sorted(weather_dir.glob("weather_part_*"))
+        if d.is_dir()
+    }
+    files_per_plz: dict[str, list[Path]] = {}
+    for p in files:
+        plz = _plz_of_weather_file(p, None)
+        if plz is None:
+            plz = _plz_of_weather_file(p, _read_weather(p))
+        files_per_plz.setdefault(plz or "unknown", []).append(p)
+    out["files_sample"] = [str(p.relative_to(weather_dir)) for p in files[:3]]
+    if files:
+        first = _read_weather(files[0])
+        out["columns"] = first.columns
+        out["rows_first_file"] = first.height
+        tcol = next((c for c in first.columns if c.lower() in WEATHER_TIME_COLS), None)
+        out["time_column"] = tcol
+        if tcol:
+            sample = str(first[tcol][0]) if first.height else ""
+            out["time_zone_hint"] = "utc" if "utc" in tcol.lower() or sample.endswith("Z") else "unknown"
+            # continuity over every file of the first PLZ (months must chain without holes)
+            first_plz = next(iter(files_per_plz))
+            ts = pl.concat([_parse_times(_read_weather(p)[tcol]) for p in files_per_plz[first_plz]]).sort()
+            out["continuity_plz"] = first_plz
+            out["continuity_files"] = len(files_per_plz[first_plz])
+            out["time_min"], out["time_max"] = str(ts.min()), str(ts.max())
+            out["hour_gaps"] = (
+                int((ts.diff().drop_nulls() != timedelta(hours=1)).sum()) if ts.len() > 1 else 0
+            )
+            out["duplicate_hours"] = int(ts.len() - ts.n_unique())
+    n_files = sorted(len(v) for v in files_per_plz.values())
+    out["n_plz"] = len(files_per_plz)
+    out["files_per_plz_min"] = n_files[0] if n_files else 0
+    out["files_per_plz_max"] = n_files[-1] if n_files else 0
+    out["plz_fewest_files"] = sorted(files_per_plz, key=lambda k: len(files_per_plz[k]))[:10]
+    plz_with_weather = set(files_per_plz) - {"unknown"}
     out["plz_in_table1"] = sorted(plz_in_table1)
     out["plz_with_weather"] = sorted(plz_with_weather)
     out["plz_missing"] = sorted(set(plz_in_table1) - plz_with_weather)
