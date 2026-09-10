@@ -29,7 +29,7 @@ interface UIActions {
   setAboutOpen: (open: boolean) => void;
 }
 
-export type UIState = UIStateSlice & UIActions;
+type UIState = UIStateSlice & UIActions;
 
 export const initialUIState: UIStateSlice = {
   selectedPlz: null,
