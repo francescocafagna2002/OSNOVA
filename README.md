@@ -54,13 +54,29 @@ Weather data can provide additional context for heating demand and solar-related
 - **Scalable:** works across multi-year data and large customer populations.
 - **Innovative:** explores useful combinations of signal processing and machine learning.
 
+## Repository Layout
+
+| Path | Contents |
+| --- | --- |
+| [`backend/`](backend) | Python data processing — CSV/data-mount tooling and its tests. See [`backend/README.md`](backend/README.md). |
+| [`frontend/`](frontend) | Next.js 16 web app for exploring asset probabilities, activity windows, and the evidence behind them. See [`frontend/README.md`](frontend/README.md). |
+
 ## Getting Started
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev      # http://localhost:3000
+```
 
 ### Preview data in Renku
 
-From the repository directory in the Renku session, run:
+From the `backend` directory in the Renku session, run:
 
 ```sh
+cd backend
 python3 scripts/preview_data.py
 ```
 
@@ -80,7 +96,11 @@ Keep data previews in the Renku console; do not commit real customer records or
 credentials. Save future processing outputs in the organizer-provided `store`
 mount, not the read-only input mount.
 
-Run the synthetic-data tests locally with `python3 -m unittest discover -s tests`.
+Run the synthetic-data tests from `backend/` with
+`python3 -m unittest discover -s tests`.
+
+Challenge datasets are not tracked in git — see the data rules in
+[`.gitignore`](.gitignore).
 
 ## Contributing
 

@@ -1,0 +1,18 @@
+# Normalize line endings: LF in the repo and in every working tree,
+# so the mixed Windows/macOS/Linux team never sees CRLF-only diffs.
+* text=auto eol=lf
+
+# Keep binaries byte-exact.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+*.xlsx binary
+*.parquet binary
+
+# Collapse noisy generated files in diffs and language stats.
+package-lock.json linguist-generated=true
