@@ -2,11 +2,9 @@
 
 import { Check } from "lucide-react";
 
-import { buttonVariants } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ASSET_BY_KEY, formatContribution, getPredictionLabel } from "@/lib/predictions";
 import type { AssetExplanation, AssetKey, ShapFeature } from "@/lib/types";
-import { cn } from "@/lib/utils";
 
 const MAX_BARS = 3;
 
@@ -30,12 +28,15 @@ export function WhyPopover({ assetKey, probability, explanation }: WhyPopoverPro
     <Popover>
       <PopoverTrigger
         aria-label={`Why ${meta.shortLabel}?`}
-        className={cn(buttonVariants({ variant: "link", size: "xs" }), "h-auto px-0")}
+        className="text-[13px] font-medium text-primary hover:text-navy hover:underline focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:outline-none"
       >
         Why?
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-72">
-        <div className="text-sm font-semibold">
+      <PopoverContent
+        align="end"
+        className="w-72 rounded-[12px] border border-border p-4 shadow-[0_4px_16px_rgba(20,40,60,0.10)] ring-0"
+      >
+        <div className="font-serif text-[15px] font-semibold text-navy">
           Why {meta.shortLabel} is {label}
         </div>
         <ul className="mt-2 space-y-1.5 text-sm">
@@ -56,7 +57,7 @@ export function WhyPopover({ assetKey, probability, explanation }: WhyPopoverPro
                     <span>{bar.feature}</span>
                     <span className="tabular-nums">{formatContribution(bar.contribution)}</span>
                   </div>
-                  <div className="mt-0.5 h-1.5 rounded-full bg-muted">
+                  <div className="mt-0.5 h-1.5 rounded-full bg-[#EEF2F5]">
                     <div
                       className="h-full rounded-full"
                       style={{

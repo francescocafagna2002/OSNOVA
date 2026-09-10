@@ -17,7 +17,7 @@ export function AppHeader() {
   const setAboutOpen = useUIStore((s) => s.setAboutOpen);
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b bg-background px-4">
+    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4">
       <Wordmark />
       <div className="hidden md:block">
         <AreaSelect />
@@ -31,13 +31,18 @@ export function AppHeader() {
           type="search"
           aria-label="Search buildings"
           placeholder="Search building ID, PLZ or town..."
-          className="pl-8"
+          className="rounded-lg border-border pl-8 focus-visible:ring-2 focus-visible:ring-primary"
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}
         />
       </div>
       <ViewToggle value={viewMode} onChange={setViewMode} />
-      <Button variant="ghost" size="sm" className="hidden sm:inline-flex" onClick={() => setAboutOpen(true)}>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="hidden sm:inline-flex hover:text-navy"
+        onClick={() => setAboutOpen(true)}
+      >
         <Info />
         About this project
       </Button>
