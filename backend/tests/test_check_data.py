@@ -207,6 +207,58 @@ def test_check_data_join_diagnostics_extract_keys_from_messy_cells(synth_dir: Pa
     assert ext["n_gp_with_meter"] == 3 and ext["n_gp_without_meter"] == 0
 
 
+def test_check_data_registry_vocabulary_dates_and_plz_agreement(synth_dir: Path, truth: dict):
+    report = run_check(synth_dir / "aew-data", synth_dir / "weather", Config(), max_files=1)
+    reg = report["registry"]
+    labeled = [t for t in truth["meters"].values() if t["labeled"]]
+    # every labeled GP joins in synth, so the joined asset counts equal the overall ones
+    assert reg["n_rows_table2_joined"] == len(labeled)
+    assert reg["asset_counts_joined"] == reg["asset_counts"]
+    assert reg["asset_counts"]["PV"] == sum(t["pv"] for t in labeled)
+    # flag vocabulary: only ja / blank in synth; PLZ and Ort are too wide to be listed
+    assert set(reg["flag_values"]["PV"]) <= {"ja", "None"}
+    assert reg["flag_values"]["PV"]["ja"] == sum(t["pv"] for t in labeled)
+    assert "PLZ" not in reg["flag_values"] and "Ort" not in reg["flag_values"]
+    # commissioning dates: only the meters with a commissioning date are filled, all parse
+    dates = reg["date_columns"]["InBetrieb-Datum"]
+    n_dated = sum(t["commissioned_on"] is not None for t in labeled)
+    assert dates["n_non_null"] == n_dated and dates["n_parsed"] == n_dated
+    assert dates["min"] >= "2023-01-01" and dates["max"] <= "2024-12-31"
+    # PLZ in Table 1 agrees with Table 2 for every joined meter (checked on the last file)
+    pa = report["plz_agreement"]
+    assert pa["file"] == "lastgang_2024_12.csv"
+    assert pa["n_meters_in_file"] == len(truth["meters"])
+    assert pa["n_joined_meters_in_file"] == len(labeled)
+    assert pa["n_plz_agree"] == len(labeled) and pa["n_plz_disagree"] == 0
+
+
+def test_check_data_date_columns_parse_string_dates(synth_dir: Path, tmp_path: Path):
+    reg = tmp_path / "registry"
+    reg.mkdir()
+    (reg / "buildings.csv").write_text(
+        "GP-Nr;PLZ;PV;InBetrieb-Datum;Übergabe\n500001;5000;ja;03.05.2024;\n500002;5000;nein;;12.11.2023\n"
+        "500003;5000;;not a date;2024-01-01\n"
+    )
+    (reg / "meters.csv").write_text("MP ID;Zählpunktbezeichnung\n1;CH1\n")
+    (reg / "installations.csv").write_text("Zählpunktbezeichnung;GPartner;Anlage\nCH1;500001;A\n")
+    r = run_check(
+        synth_dir / "aew-data", synth_dir / "weather", Config(), registry_dir=reg, scan_table1=False
+    )
+    d = r["registry"]["date_columns"]
+    assert d["InBetrieb-Datum"] == {
+        "n_non_null": 2,
+        "dtype": "String",
+        "format": "%d.%m.%Y",
+        "n_parsed": 1,
+        "min": "2024-05-03",
+        "max": "2024-05-03",
+    }
+    assert d["Übergabe"]["n_non_null"] == 2 and d["Übergabe"]["n_parsed"] == 1
+    assert r["registry"]["flag_values"]["PV"] == {"ja": 1, "nein": 1, "None": 1}
+    assert r["registry"]["asset_counts_joined"] == {"PV": 1}
+    assert r["plz_agreement"] is None
+
+
 def test_check_data_skip_table1_and_null_counts(synth_dir: Path, truth: dict):
     fast = run_check(synth_dir / "aew-data", synth_dir / "weather", Config(), scan_table1=False)
     assert fast["files"]["count"] == 24 and fast["files"]["sampled"] == []

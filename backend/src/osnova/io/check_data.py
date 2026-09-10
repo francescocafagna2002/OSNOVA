@@ -255,7 +255,8 @@ def find_registry_files(data_dir: Path, separator: str) -> dict[str, Path]:
     return found
 
 
-def _check_registry(data_dir: Path, cfg: Config) -> dict[str, Any]:
+def _check_registry(data_dir: Path, cfg: Config) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Registry report plus the key frames for the PLZ agreement check (None when a table is missing)."""
     sep = cfg.ingest.csv_separator
     paths = find_registry_files(data_dir, sep)
     out: dict[str, Any] = {"files": {k: str(v) for k, v in paths.items()}, "columns": {}}
@@ -266,7 +267,7 @@ def _check_registry(data_dir: Path, cfg: Config) -> dict[str, Any]:
     if set(tables) != {"table2", "table3", "table4"}:
         out["missing_tables"] = sorted({"table2", "table3", "table4"} - set(tables))
         out.update(n_gp=None, n_meters_table3=None, n_meters_joined=None, meters_per_gp_hist={})
-        return out
+        return out, None
     t2, t3, t4 = tables["table2"], tables["table3"], tables["table4"]
     gp2, zp3, zp4, gp4 = (
         _has(t2.columns, "GP-Nr"),
@@ -295,8 +296,82 @@ def _check_registry(data_dir: Path, cfg: Config) -> dict[str, Any]:
             "gp", empty_as_null=True
         )
         out["joined_with_extracted_keys"] = {"key_width": width, **_join_counts(t2x, t3k, t4k)}
+    joined_gps = t4k.join(t3k, on="zp", how="semi")["gp"]
+    t2_joined = t2.filter(_raw_key(gp2).is_in(joined_gps.to_list()))
+    out["n_rows_table2_joined"] = t2_joined.height
     out["asset_counts"] = _asset_counts(t2)
+    out["asset_counts_joined"] = _asset_counts(t2_joined)
+    out["flag_values"] = _flag_values(t2, exclude=(gp2,))
+    out["date_columns"] = _date_columns(t2)
+    frames = {"t2": t2, "gp2": gp2, "plz2": _has(t2.columns, "PLZ"), "t3k": t3k, "t4k": t4k}
+    return out, frames
+
+
+def _flag_values(t2: pl.DataFrame, exclude: tuple[str, ...]) -> dict[str, dict[str, int]]:
+    """Value vocabulary of low-cardinality string columns (ja/nein/blank …); no free text, no ids."""
+    out: dict[str, dict[str, int]] = {}
+    for col in t2.columns:
+        s = t2[col]
+        if col in exclude or s.dtype != pl.String or s.n_unique() > 12:
+            continue
+        if re.search(r"(?i)plz|^ort$|kanton|-nr|\bid\b", col):  # places and ids are not flags
+            continue
+        vc = s.str.strip_chars().value_counts().sort("count", descending=True)
+        out[col] = {str(v): int(n) for v, n in vc.iter_rows()}
     return out
+
+
+DATE_FORMATS = ("%d.%m.%Y", "%Y-%m-%d", "%d.%m.%y", "%m/%d/%Y", "%Y-%m-%d %H:%M:%S", "%d.%m.%Y %H:%M:%S")
+
+
+def _date_columns(t2: pl.DataFrame) -> dict[str, Any]:
+    """For every date-like column: how many rows are filled, which format parses them, min and max."""
+    out: dict[str, Any] = {}
+    for col in t2.columns:
+        if not re.search(r"(?i)datum|übergabe|uebergabe|baustart|date", col):
+            continue
+        s = t2[col]
+        info: dict[str, Any] = {"n_non_null": int(s.drop_nulls().len()), "dtype": str(s.dtype)}
+        if s.dtype in (pl.Date, pl.Datetime):
+            d = s.cast(pl.Date).drop_nulls()
+        else:
+            v = s.cast(pl.String).str.strip_chars().drop_nulls()
+            v = v.filter(v != "")
+            info["n_non_null"] = int(v.len())
+            best, d = None, pl.Series([], dtype=pl.Date)
+            for fmt in DATE_FORMATS:
+                parsed = v.str.strptime(pl.Date, fmt, strict=False).drop_nulls()
+                if parsed.len() > d.len():
+                    best, d = fmt, parsed
+            info["format"] = best
+        info["n_parsed"] = int(d.len())
+        info["min"], info["max"] = (str(d.min()), str(d.max())) if d.len() else (None, None)
+        out[col] = info
+    return out
+
+
+def _plz_agreement(path: Path, frames: dict[str, Any], cfg: Config) -> dict[str, Any]:
+    """Do joined meters sit in the PLZ Table 2 says? (guards against ids that match by accident)."""
+    lf = _scan_csv(path, cfg.ingest.csv_separator)
+    cols = lf.collect_schema().names()
+    if "PLZ" not in cols or frames["plz2"] is None:
+        return {"file": path.name, "skipped": "no PLZ column"}
+    t1 = (
+        lf.select(meter=pl.col("MP ID").str.strip_chars(), plz1=pl.col("PLZ").str.strip_chars())
+        .unique()
+        .collect(engine="streaming")
+    )
+    t2p = frames["t2"].select(gp=_raw_key(frames["gp2"]), plz2=_raw_key(frames["plz2"])).drop_nulls().unique()
+    j = frames["t3k"].join(frames["t4k"], on="zp", how="inner").join(t2p, on="gp", how="inner")
+    m = j.join(t1, on="meter", how="inner")
+    agree = int((m["plz1"] == m["plz2"]).sum())
+    return {
+        "file": path.name,
+        "n_meters_in_file": int(t1["meter"].n_unique()),
+        "n_joined_meters_in_file": int(m["meter"].n_unique()),
+        "n_plz_agree": agree,
+        "n_plz_disagree": int(m.height - agree),
+    }
 
 
 def _raw_key(c: str) -> pl.Expr:
@@ -444,6 +519,10 @@ def run_check(
     files = find_table1_files(data_dir)
     t1 = _check_table1(files, cfg, max_files, data_dir, scan=scan_table1)
     plz_in_table1 = t1.pop("_plz_in_table1")
+    registry, frames = _check_registry(registry_dir or data_dir, cfg)
+    plz_agreement: dict[str, Any] | None = None
+    if scan_table1 and files and frames is not None:
+        plz_agreement = _plz_agreement(files[-1], frames, cfg)
     return {
         "data_dir": str(data_dir),
         "registry_dir": str(registry_dir or data_dir),
@@ -455,7 +534,8 @@ def run_check(
             "date_format": cfg.ingest.date_format,
         },
         **t1,
-        "registry": _check_registry(registry_dir or data_dir, cfg),
+        "registry": registry,
+        "plz_agreement": plz_agreement,
         "weather": _check_weather(weather_dir, plz_in_table1),
     }
 
