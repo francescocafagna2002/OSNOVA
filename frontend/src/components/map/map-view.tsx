@@ -45,22 +45,26 @@ export function MapView() {
   const selectedPlz = useUIStore((s) => s.selectedPlz);
   const selectPlz = useUIStore((s) => s.selectPlz);
   const [hover, setHover] = useState<Hover>(null);
-  const [patchedStyle, setPatchedStyle] = useState<StyleSpecification | undefined>(undefined);
+  const [mapStyle, setMapStyle] = useState<StyleSpecification | string | null>(null);
   const cantonFittedRef = useRef(false);
   const fitLatchExpiredRef = useRef(false);
 
   const data = useMemo(() => buildPlzGeoJson(counts), [counts]);
 
-  // Spec R4: recolour the vector style in the browser. Until it arrives — and for good if the
-  // request fails — the map renders the upstream style straight from its URL.
+  // Spec R4: recolour the vector style in the browser. Mounting the map on the upstream URL
+  // first would flash the unpatched palette and make MapLibre rebuild the style from scratch
+  // when the patched object arrives, so the map waits for the promise to settle: the patched
+  // style on success, the plain URL if the fetch fails (a failed recolouring is not worth a
+  // console message). The container keeps its size meanwhile, so the resize-latched initial
+  // fit still lands on the map's first real resize.
   useEffect(() => {
     let active = true;
     void loadPatchedStyle(MAP_STYLE_URL).then(
       (style) => {
-        if (active) setPatchedStyle(style);
+        if (active) setMapStyle(style);
       },
       () => {
-        // Keep the unpatched basemap; a recolouring failure is not worth a console message.
+        if (active) setMapStyle(MAP_STYLE_URL);
       },
     );
     return () => {
@@ -137,23 +141,25 @@ export function MapView() {
   }, []);
 
   return (
-    <div className="relative h-full w-full" data-testid="map-view">
-      <Map
-        ref={mapRef}
-        mapStyle={patchedStyle ?? MAP_STYLE_URL}
-        initialViewState={{ bounds: AARGAU_BBOX, fitBoundsOptions: { padding: INITIAL_FIT_PADDING } }}
-        interactiveLayerIds={[PLZ_FILL_LAYER_ID]}
-        onResize={fitCantonOnce}
-        onMoveStart={expireFitLatchOnUserMove}
-        onClick={handleClick}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={clearHover}
-        cursor={hover ? "pointer" : "grab"}
-        style={{ width: "100%", height: "100%" }}
-      >
-        <NavigationControl position="bottom-right" showCompass={false} />
-        <PlzLayers data={data} highlightedPlz={highlightedPlz} hoveredPlz={hover?.plz ?? null} />
-      </Map>
+    <div className="relative h-full w-full bg-background" data-testid="map-view">
+      {mapStyle !== null && (
+        <Map
+          ref={mapRef}
+          mapStyle={mapStyle}
+          initialViewState={{ bounds: AARGAU_BBOX, fitBoundsOptions: { padding: INITIAL_FIT_PADDING } }}
+          interactiveLayerIds={[PLZ_FILL_LAYER_ID]}
+          onResize={fitCantonOnce}
+          onMoveStart={expireFitLatchOnUserMove}
+          onClick={handleClick}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={clearHover}
+          cursor={hover ? "pointer" : "grab"}
+          style={{ width: "100%", height: "100%" }}
+        >
+          <NavigationControl position="bottom-right" showCompass={false} />
+          <PlzLayers data={data} highlightedPlz={highlightedPlz} hoveredPlz={hover?.plz ?? null} />
+        </Map>
+      )}
       <MapTooltip plz={hover?.plz ?? null} count={hover?.count ?? 0} x={hover?.x ?? 0} y={hover?.y ?? 0} />
     </div>
   );

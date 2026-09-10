@@ -50,6 +50,17 @@ const clickWith = (features: unknown[]) =>
 
 const STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
 
+/**
+ * The map mounts only once the recoloured-style promise has settled, so every case has to let
+ * that microtask run before the mock map's props exist. Flushed with `act` rather than
+ * `findBy*` because RTL's `waitFor` only knows how to advance Jest's fake timers, so it would
+ * deadlock in the fake-timer cases below.
+ */
+const mountMap = async () => {
+  await act(async () => {});
+  expect(screen.getByTestId("mock-map")).toBeInTheDocument();
+};
+
 describe("MapView", () => {
   beforeEach(() => {
     useUIStore.setState(initialUIState);
@@ -66,7 +77,8 @@ describe("MapView", () => {
 
   it("falls back to the style URL when the recolouring fetch fails", async () => {
     renderWithProviders(<MapView />);
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith(STYLE_URL));
+    await mountMap();
+    expect(fetch).toHaveBeenCalledWith(STYLE_URL);
     expect(mapMock.props.mapStyle).toBe(STYLE_URL);
   });
 
@@ -81,20 +93,22 @@ describe("MapView", () => {
       vi.fn(() => Promise.resolve({ ok: true, status: 200, json: async () => style } as Response)),
     );
     renderWithProviders(<MapView />);
-    await waitFor(() => expect(mapMock.props.mapStyle).not.toBe(STYLE_URL));
+    await mountMap();
+    expect(mapMock.props.mapStyle).not.toBe(STYLE_URL);
     const patched = mapMock.props.mapStyle as { layers: { paint: Record<string, string> }[] };
     expect(patched.layers[0].paint["background-color"]).toBe(MAP.background);
   });
 
-  it("renders the map and no tooltip initially", () => {
+  it("renders the map and no tooltip initially", async () => {
     renderWithProviders(<MapView />);
+    await mountMap();
     expect(screen.getByTestId("mock-map")).toBeInTheDocument();
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
   it("selects a PLZ on click, toggles it off on a second click, clears on empty click", async () => {
     renderWithProviders(<MapView />);
-    await waitFor(() => expect(mapMock.props.onClick).toBeTypeOf("function"));
+    await mountMap();
     await clickWith([feature("5000", 2)]);
     expect(useUIStore.getState().selectedPlz).toBe("5000");
     await clickWith([feature("5000", 2)]);
@@ -106,7 +120,7 @@ describe("MapView", () => {
 
   it("shows a tooltip with the building count while hovering a PLZ", async () => {
     renderWithProviders(<MapView />);
-    await waitFor(() => expect(mapMock.props.onMouseMove).toBeTypeOf("function"));
+    await mountMap();
     await act(() => (mapMock.props.onMouseMove as Handler)({ features: [feature("5000", 2)], point: { x: 40, y: 50 } }));
     expect(screen.getByRole("tooltip")).toHaveTextContent("5000 Aarau · 2 buildings");
     await act(() => (mapMock.props.onMouseLeave as () => void)());
@@ -115,7 +129,7 @@ describe("MapView", () => {
 
   it("fits the whole canton on the first resize and never again", async () => {
     renderWithProviders(<MapView />);
-    await waitFor(() => expect(mapMock.props.onResize).toBeTypeOf("function"));
+    await mountMap();
     act(() => resize());
     expect(mapMock.fitBounds).toHaveBeenCalledWith(AARGAU_BBOX, { padding: 24, duration: 0 });
     act(() => resize());
@@ -125,23 +139,25 @@ describe("MapView", () => {
   it("leaves a highlighted area framed when the first resize arrives", async () => {
     useUIStore.getState().selectPlz("5400");
     renderWithProviders(<MapView />);
-    await waitFor(() => expect(mapMock.props.onResize).toBeTypeOf("function"));
+    await mountMap();
     mapMock.fitBounds.mockClear();
     act(() => resize());
     expect(mapMock.fitBounds).not.toHaveBeenCalled();
   });
 
-  it("does not refit a resize arriving after the initial-fit latch has expired (timeout)", () => {
+  it("does not refit a resize arriving after the initial-fit latch has expired (timeout)", async () => {
     vi.useFakeTimers();
     renderWithProviders(<MapView />);
+    await mountMap();
     expect(mapMock.props.onResize).toBeTypeOf("function");
     act(() => vi.advanceTimersByTime(1500));
     act(() => resize());
     expect(mapMock.fitBounds).not.toHaveBeenCalled();
   });
 
-  it("does not refit once a user-originated move has disarmed the latch", () => {
+  it("does not refit once a user-originated move has disarmed the latch", async () => {
     renderWithProviders(<MapView />);
+    await mountMap();
     expect(mapMock.props.onMoveStart).toBeTypeOf("function");
     act(() =>
       (mapMock.props.onMoveStart as Handler)({ originalEvent: new MouseEvent("mousedown") }),
@@ -152,7 +168,7 @@ describe("MapView", () => {
 
   it("fits the map to the highlighted PLZ", async () => {
     renderWithProviders(<MapView />);
-    await waitFor(() => expect(mapMock.props.onClick).toBeTypeOf("function"));
+    await mountMap();
     act(() => useUIStore.getState().selectBuilding("AG-000003"));
     await waitFor(() => expect(mapMock.fitBounds).toHaveBeenCalledTimes(1));
     const [bbox, options] = mapMock.fitBounds.mock.calls[0];
