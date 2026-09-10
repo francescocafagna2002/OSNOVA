@@ -13,7 +13,7 @@ const OPTIONS: { value: ViewMode; label: string; icon: LucideIcon }[] = [
 
 export function ViewToggle({ value, onChange }: { value: ViewMode; onChange: (mode: ViewMode) => void }) {
   return (
-    <div role="group" aria-label="View" className="flex rounded-lg border bg-muted p-0.5">
+    <div role="group" aria-label="View" className="flex rounded-lg border border-border bg-card p-0.5">
       {OPTIONS.map(({ value: mode, label, icon: Icon }) => {
         const active = value === mode;
         return (
@@ -23,7 +23,7 @@ export function ViewToggle({ value, onChange }: { value: ViewMode; onChange: (mo
             variant="ghost"
             aria-pressed={active}
             onClick={() => onChange(mode)}
-            className={cn("h-7 px-2.5", active && "bg-background text-foreground shadow-sm hover:bg-background")}
+            className={cn("h-7 px-2.5", active && "bg-accent text-navy hover:bg-accent")}
           >
             <Icon />
             {label}
