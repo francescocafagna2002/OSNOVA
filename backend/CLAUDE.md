@@ -44,6 +44,12 @@ export/buildings.json, export/featured.json  # osnova export  (id = AG-{gp_nr})
 data_check.json, _manifest_<stage>.json
 ```
 
+`feature_pipeline/` (top-level under `backend/`, not under `src/osnova/`) is a
+separate, already-implemented building-level (`GP-Nr`) feature extraction task
+— see `feature_pipeline/README.md` for why it exists next to this design
+instead of inside it, and what to port if/when Stream B's meter-year
+`features/` gets built.
+
 ## Hard rules
 
 1. **No real data on this machine.** Never search for, read, or invent real AEW files. Everything
