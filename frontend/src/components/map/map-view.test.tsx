@@ -2,7 +2,9 @@ import { act, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { clearPatchedStyleCache } from "@/lib/map-style";
 import { AARGAU_BBOX } from "@/lib/plz";
+import { MAP } from "@/lib/theme";
 import { initialUIState, useUIStore } from "@/stores/ui-store";
 import { makeBuilding } from "@/test/fixtures";
 import { renderWithProviders } from "@/test/render";
@@ -46,14 +48,42 @@ const resize = () =>
 const clickWith = (features: unknown[]) =>
   act(() => (mapMock.props.onClick as Handler)({ features, point: { x: 10, y: 10 } }));
 
+const STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
+
 describe("MapView", () => {
   beforeEach(() => {
     useUIStore.setState(initialUIState);
     mapMock.fitBounds.mockClear();
+    clearPatchedStyleCache();
+    // Offline by default: the map must keep working on the unpatched style URL.
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("falls back to the style URL when the recolouring fetch fails", async () => {
+    renderWithProviders(<MapView />);
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(STYLE_URL));
+    expect(mapMock.props.mapStyle).toBe(STYLE_URL);
+  });
+
+  it("passes the patched style object once it has loaded", async () => {
+    const style = {
+      version: 8,
+      sources: {},
+      layers: [{ id: "background", type: "background", paint: { "background-color": "#ffffff" } }],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve({ ok: true, status: 200, json: async () => style } as Response)),
+    );
+    renderWithProviders(<MapView />);
+    await waitFor(() => expect(mapMock.props.mapStyle).not.toBe(STYLE_URL));
+    const patched = mapMock.props.mapStyle as { layers: { paint: Record<string, string> }[] };
+    expect(patched.layers[0].paint["background-color"]).toBe(MAP.background);
   });
 
   it("renders the map and no tooltip initially", () => {

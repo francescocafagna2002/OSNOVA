@@ -2,7 +2,7 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import { setWorkerUrl } from "maplibre-gl";
+import { setWorkerUrl, type StyleSpecification } from "maplibre-gl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, {
   NavigationControl,
@@ -15,6 +15,7 @@ import Map, {
 import { MapTooltip } from "@/components/map/map-tooltip";
 import { PLZ_FILL_LAYER_ID, PlzLayers } from "@/components/map/plz-layers";
 import { useHighlightedPlz, usePlzCounts } from "@/hooks/use-buildings";
+import { loadPatchedStyle } from "@/lib/map-style";
 import { AARGAU_BBOX, buildPlzGeoJson, getPlzArea, type PlzCountProperties } from "@/lib/plz";
 import { useUIStore } from "@/stores/ui-store";
 
@@ -44,10 +45,28 @@ export function MapView() {
   const selectedPlz = useUIStore((s) => s.selectedPlz);
   const selectPlz = useUIStore((s) => s.selectPlz);
   const [hover, setHover] = useState<Hover>(null);
+  const [patchedStyle, setPatchedStyle] = useState<StyleSpecification | undefined>(undefined);
   const cantonFittedRef = useRef(false);
   const fitLatchExpiredRef = useRef(false);
 
   const data = useMemo(() => buildPlzGeoJson(counts), [counts]);
+
+  // Spec R4: recolour the vector style in the browser. Until it arrives — and for good if the
+  // request fails — the map renders the upstream style straight from its URL.
+  useEffect(() => {
+    let active = true;
+    void loadPatchedStyle(MAP_STYLE_URL).then(
+      (style) => {
+        if (active) setPatchedStyle(style);
+      },
+      () => {
+        // Keep the unpatched basemap; a recolouring failure is not worth a console message.
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -121,7 +140,7 @@ export function MapView() {
     <div className="relative h-full w-full" data-testid="map-view">
       <Map
         ref={mapRef}
-        mapStyle={MAP_STYLE_URL}
+        mapStyle={patchedStyle ?? MAP_STYLE_URL}
         initialViewState={{ bounds: AARGAU_BBOX, fitBoundsOptions: { padding: INITIAL_FIT_PADDING } }}
         interactiveLayerIds={[PLZ_FILL_LAYER_ID]}
         onResize={fitCantonOnce}
