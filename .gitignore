@@ -1,21 +1,59 @@
-# Python bytecode and virtual environments
+# ─── OSNOVA ──────────────────────────────────────────────────────────────────
+# Repo-wide ignores. Sub-projects may add their own scoped .gitignore
+# (see frontend/.gitignore for Next.js specifics).
+
+# ─── Secrets & local config ──────────────────────────────────────────────────
+# Keep a shareable .env.example template committed.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets.*
+
+# ─── Node / JavaScript ───────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.npm/
+.eslintcache
+*.tsbuildinfo
+
+# ─── Next.js / build output ──────────────────────────────────────────────────
+.next/
+out/
+build/
+dist/
+.turbo/
+.vercel/
+
+# ─── Python ──────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
 .Python
 .venv/
 venv/
 env/
 ENV/
-
-# Build and packaging output
-build/
-dist/
-.eggs/
-*.egg-info/
 *.egg
+*.egg-info/
+.eggs/
+.installed.cfg
 pip-wheel-metadata/
 
-# Test, type-checker, and linter caches
+# ─── Test, type-checker and linter caches ────────────────────────────────────
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -25,22 +63,77 @@ pip-wheel-metadata/
 .nox/
 .coverage
 .coverage.*
-htmlcov/
+coverage/
 coverage.xml
+htmlcov/
 
-# Notebook checkpoints
+# ─── Notebooks ───────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
+*-checkpoint.ipynb
 
-# Local secrets; keep a shareable template
-.env
-.env.*
-!.env.example
+# ─── Data & models ───────────────────────────────────────────────────────────
+# Challenge datasets (90k customers x 4 years of 15-min readings) and any
+# derived artifacts stay out of git. `data/*` (not `data/`) so the exceptions
+# below can take effect — git never descends into a fully excluded directory.
+# Small committed samples go in data/samples/ and are added explicitly:
+#   git add -f data/samples/<file>
+data/*
+!data/README.md
+!data/samples/
+datasets/
 
-# Renku data mounts and generated results
+# Renku mounts: read-only input data and the organizer-provided output store.
 /aew-data/
 /aew_data/
-/data/
 /store/
 
-# Local OS files
+*.csv
+*.tsv
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.xlsx
+*.xls
+*.zip
+*.gz
+*.7z
+# Root-only, so a Python package named models/ or artifacts/ stays tracked.
+/models/
+/artifacts/
+*.joblib
+*.pkl
+*.pickle
+*.onnx
+mlruns/
+.dvc/cache/
+wandb/
+
+# ─── Logs & temp ─────────────────────────────────────────────────────────────
+logs/
+*.log
+tmp/
+temp/
+*.tmp
+*.bak
+*.orig
+
+# ─── Editors & IDEs ──────────────────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+
+# ─── OS cruft ────────────────────────────────────────────────────────────────
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
