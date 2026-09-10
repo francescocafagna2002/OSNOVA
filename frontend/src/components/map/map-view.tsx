@@ -32,7 +32,7 @@ const FIT_PADDING = 48;
 const FIT_DURATION_MS = 900;
 const FIT_MAX_ZOOM = 13;
 
-type Hover = { plz: string; count: number; x: number; y: number } | null;
+type Hover = { plz: string; count: number; x: number; y: number; containerWidth?: number } | null;
 
 function plzFeatureAt(event: MapLayerMouseEvent): PlzCountProperties | undefined {
   return event.features?.[0]?.properties as PlzCountProperties | undefined;
@@ -105,7 +105,17 @@ export function MapView() {
 
   const handleMouseMove = useCallback((event: MapLayerMouseEvent) => {
     const feature = plzFeatureAt(event);
-    setHover(feature ? { plz: feature.plz, count: feature.count, x: event.point.x, y: event.point.y } : null);
+    setHover(
+      feature
+        ? {
+            plz: feature.plz,
+            count: feature.count,
+            x: event.point.x,
+            y: event.point.y,
+            containerWidth: containerRef.current?.clientWidth,
+          }
+        : null,
+    );
   }, []);
 
   const clearHover = useCallback(() => setHover(null), []);
@@ -171,7 +181,7 @@ export function MapView() {
         count={hover?.count ?? 0}
         x={hover?.x ?? 0}
         y={hover?.y ?? 0}
-        containerWidth={containerRef.current?.clientWidth}
+        containerWidth={hover?.containerWidth}
       />
     </div>
   );
