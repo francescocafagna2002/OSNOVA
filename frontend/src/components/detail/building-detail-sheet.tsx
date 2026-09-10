@@ -8,9 +8,6 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { useSelectedBuilding } from "@/hooks/use-buildings";
 import { useUIStore } from "@/stores/ui-store";
 
-/** Desktop width per spec D6; the inline style beats the generated `sm:max-w-sm`. */
-const SHEET_STYLE = { width: "min(100vw, 640px)", maxWidth: "none" } as const;
-
 export function BuildingDetailSheet() {
   const building = useSelectedBuilding();
   const isDetailOpen = useUIStore((s) => s.isDetailOpen);
@@ -24,19 +21,21 @@ export function BuildingDetailSheet() {
         if (!next) closeDetail();
       }}
     >
-      <SheetContent side="right" className="overflow-y-auto" style={SHEET_STYLE}>
+      <SheetContent side="right" className="overflow-y-auto">
         {building && (
           <>
-            <SheetHeader>
-              <SheetTitle>Building {building.id}</SheetTitle>
+            <SheetHeader className="gap-0.5 p-6">
+              <SheetTitle className="text-2xl font-semibold text-navy">Building {building.id}</SheetTitle>
               <SheetDescription>
                 {building.postcode} {building.city}, {building.canton}
               </SheetDescription>
             </SheetHeader>
-            <div className="space-y-6 px-4 pb-6">
+            <div className="space-y-8 px-6 pb-6">
               <PredictionCards predictions={building.predictions} explanation={building.explanation} />
               <section>
-                <h3 className="mb-2 text-sm font-semibold">Electricity profile — Last 24 hours</h3>
+                <h3 className="mb-3 font-serif text-lg font-semibold text-navy">
+                  Electricity profile — Last 24 hours
+                </h3>
                 <ElectricityChart electricity={building.electricity} events={building.events} />
               </section>
               <PredictionExplanation />
