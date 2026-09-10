@@ -143,3 +143,11 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
+
+# ─── Agent scratch and worktrees ─────────────────────────────────────────────
+.claude/worktrees/
+.superpowers/
+
+# ─── Playwright ──────────────────────────────────────────────────────────────
+frontend/test-results/
+frontend/playwright-report/
