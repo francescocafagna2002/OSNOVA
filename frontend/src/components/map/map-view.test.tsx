@@ -1,6 +1,6 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AARGAU_BBOX } from "@/lib/plz";
 import { initialUIState, useUIStore } from "@/stores/ui-store";
@@ -52,6 +52,10 @@ describe("MapView", () => {
     mapMock.fitBounds.mockClear();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("renders the map and no tooltip initially", () => {
     renderWithProviders(<MapView />);
     expect(screen.getByTestId("mock-map")).toBeInTheDocument();
@@ -93,6 +97,25 @@ describe("MapView", () => {
     renderWithProviders(<MapView />);
     await waitFor(() => expect(mapMock.props.onResize).toBeTypeOf("function"));
     mapMock.fitBounds.mockClear();
+    act(() => resize());
+    expect(mapMock.fitBounds).not.toHaveBeenCalled();
+  });
+
+  it("does not refit a resize arriving after the initial-fit latch has expired (timeout)", () => {
+    vi.useFakeTimers();
+    renderWithProviders(<MapView />);
+    expect(mapMock.props.onResize).toBeTypeOf("function");
+    act(() => vi.advanceTimersByTime(1500));
+    act(() => resize());
+    expect(mapMock.fitBounds).not.toHaveBeenCalled();
+  });
+
+  it("does not refit once a user-originated move has disarmed the latch", () => {
+    renderWithProviders(<MapView />);
+    expect(mapMock.props.onMoveStart).toBeTypeOf("function");
+    act(() =>
+      (mapMock.props.onMoveStart as Handler)({ originalEvent: new MouseEvent("mousedown") }),
+    );
     act(() => resize());
     expect(mapMock.fitBounds).not.toHaveBeenCalled();
   });
