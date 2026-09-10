@@ -2,7 +2,7 @@ import type { StyleSpecification } from "maplibre-gl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { clearPatchedStyleCache, loadPatchedStyle, patchMapStyle } from "@/lib/map-style";
-import { MAP, NEUTRAL } from "@/lib/theme";
+import { MAP } from "@/lib/theme";
 
 /** A miniature style with one layer per patch rule, plus a layer no rule matches. */
 function styleFixture(): StyleSpecification {

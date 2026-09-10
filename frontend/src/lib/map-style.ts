@@ -1,6 +1,6 @@
 import type { StyleSpecification } from "maplibre-gl";
 
-import { MAP, NEUTRAL } from "@/lib/theme";
+import { MAP } from "@/lib/theme";
 
 /**
  * Client-side recolouring of a vector basemap style (spec R4).
