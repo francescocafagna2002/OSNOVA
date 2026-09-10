@@ -22,6 +22,9 @@ npm run check          # lint + typecheck + unit tests
 npm run test:e2e       # Playwright demo flow (needs `npx playwright install chromium` once)
 ```
 
+> Blank map? Run `npm run dev` / `npm run build`, not `next dev` directly — the
+> `predev`/`prebuild` hook copies the MapLibre worker files to `public/maplibre/`.
+
 ## Project structure
 
 ```
@@ -30,11 +33,11 @@ src/
   components/
     app-shell.tsx      # header + map + list + detail layout, view mode
     header/            # wordmark, area select, search, view toggle, about dialog
-    map/                # MapLibre PLZ areas, tooltip
-    buildings/          # list panel, area header, building cards, chips
-    detail/              # detail sheet, prediction cards, why popover, SHAP details
-    chart/               # ECharts 24h fingerprint + legend
-    ui/                  # shadcn/ui (generated)
+    map/               # MapLibre PLZ areas, tooltip
+    buildings/         # list panel, area header, building cards, chips
+    detail/            # detail sheet, prediction cards, why popover, SHAP details
+    chart/             # ECharts 24h fingerprint + legend
+    ui/                # shadcn/ui (generated)
   data/aargau-plz.json # PLZ polygons (swisstopo, built by scripts/build-plz-geojson.sh)
   hooks/               # TanStack Query hooks and derived selectors
   lib/                 # pure domain logic: types, predictions, search, chart option, mock data, PLZ
