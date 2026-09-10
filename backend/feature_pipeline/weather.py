@@ -9,9 +9,12 @@ note in ``features.py``):
     sum, so "sunny" is judged relative to the month and does not just relearn
     summer-vs-winter seasonality.
 
-The real file layout (one CSV per PLZ vs. one big file, filename vs. embedded
-"PLZ" column) is not pinned down by the brief, so the loader tries both and
-logs what it found — see ``load_weather``.
+Real layout on Renku: one or more "part" directories, each containing
+`hourly/<PLZ>/YYYY-MM.csv.gz` — one gzipped file per PLZ per month, PLZ being
+the directory name, not the file name. ``load_weather`` reads PLZ from each
+file's parent directory first (this layout), falling back to an embedded
+``PLZ`` column or a PLZ found in the filename itself for any other layout it
+encounters — see ``_infer_plz``.
 """
 
 from __future__ import annotations
@@ -55,14 +58,32 @@ def _plz_from_filename(path_name: str, regex: str) -> str | None:
     return match.group(1) if match else None
 
 
+_PLZ_DIR_RE = re.compile(r"^\d{4,5}$")
+
+
+def _plz_from_parent_dir(path) -> str | None:
+    """The real layout is `.../hourly/<PLZ>/YYYY-MM.csv.gz` — PLZ is a directory
+
+    name, not part of the filename. Only trust this when the parent directory
+    name looks like a Swiss postcode, so an unrelated folder structure falls
+    through to the filename/embedded-column strategies instead.
+    """
+    name = path.parent.name
+    return name if _PLZ_DIR_RE.match(name) else None
+
+
 def load_weather(paths: PathsConfig, cfg: ThresholdsConfig) -> WeatherData:
-    weather_dir = paths.weather_dir
-    files = sorted(weather_dir.glob(paths.weather_glob)) if weather_dir.exists() else []
+    search_roots = paths.weather_search_roots
+    files: list = []
+    for root in search_roots:
+        if root.exists():
+            files.extend(root.glob(paths.weather_glob))
+    files = sorted(set(files))
     if not files:
         logger.warning(
             "No weather files found under %s (glob %r). All weather-based "
             "features will be null.",
-            weather_dir,
+            search_roots,
             paths.weather_glob,
         )
         empty_hourly = pl.DataFrame(
@@ -87,8 +108,10 @@ def load_weather(paths: PathsConfig, cfg: ThresholdsConfig) -> WeatherData:
             logger.warning("Weather file %s has no 'time' column, skipping", path)
             continue
 
-        plz = None
-        if plz_col is not None:
+        # Priority: the real layout's PLZ-named parent directory, then an
+        # embedded PLZ column, then a PLZ found in the filename itself.
+        plz = _plz_from_parent_dir(path)
+        if plz is None and plz_col is not None:
             values = raw.get_column(plz_col).drop_nulls().cast(pl.Utf8).unique().to_list()
             if len(values) == 1:
                 plz = values[0]
@@ -130,7 +153,7 @@ def load_weather(paths: PathsConfig, cfg: ThresholdsConfig) -> WeatherData:
         frames.append(frame.select("plz", "ts", *HOURLY_VALUE_COLUMNS))
 
     if not frames:
-        raise ValueError(f"No usable weather files under {weather_dir}")
+        raise ValueError(f"No usable weather files under {search_roots}")
 
     hourly = pl.concat(frames, how="vertical_relaxed").drop_nulls(subset=["ts"])
 

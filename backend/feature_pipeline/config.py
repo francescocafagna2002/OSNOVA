@@ -46,13 +46,23 @@ class PathsConfig:
     zaehler_gp_file: Path = Path("aew-data/test-blob/input_data/Zähler-GP.csv")
     labels_file: Path = Path("aew-data/test-blob/input_data/HackDays2026 - GIGI.csv")
 
-    # Directory of per-PLZ Open-Meteo hourly CSVs. File naming is not fixed by
-    # the brief; ``weather_plz_glob``/``weather_plz_regex`` control how the PLZ
-    # is recovered from each file (filename first, falling back to a "PLZ"
-    # metadata column inside the file).
+    # Real layout (confirmed on Renku): one or more "part" directories, each
+    # `<part>/hourly/<PLZ>/YYYY-MM.csv.gz` (+ a sibling `.json` metadata file
+    # per month, currently unused). Point this at the directory that contains
+    # the part folders, e.g. the parent of `weather_part_1/`, `weather_part_2/`.
+    # PLZ is read from each file's immediate parent directory name; the glob
+    # matches both plain `.csv` and gzipped `.csv.gz`.
     weather_dir: Path = Path("aew-data/test-blob/input_data/weather")
-    weather_glob: str = "*.csv"
+    # If the "part" directories have no shared parent (or you'd rather list
+    # them explicitly), set this instead — it takes priority over
+    # ``weather_dir`` when non-empty. Each entry is searched independently.
+    weather_dirs: tuple[Path, ...] = ()
+    weather_glob: str = "**/*.csv*"
     weather_plz_regex: str = r"(\d{4,5})"
+
+    @property
+    def weather_search_roots(self) -> tuple[Path, ...]:
+        return self.weather_dirs if self.weather_dirs else (self.weather_dir,)
 
     # Where intermediate and final outputs are written.
     output_dir: Path = Path("data/feature_output")

@@ -8,9 +8,23 @@ stripped) so a harmless header variation does not break the pipeline.
 
 from __future__ import annotations
 
+import gzip
+import io
 from pathlib import Path
 
 import polars as pl
+
+
+def _is_gzip(path: Path) -> bool:
+    return path.name.lower().endswith(".gz")
+
+
+def _read_bytes(path: Path) -> bytes:
+    """Read a file's content, transparently gunzipping ``*.gz`` files."""
+    if _is_gzip(path):
+        with gzip.open(path, "rb") as fh:
+            return fh.read()
+    return path.read_bytes()
 
 _UMLAUT_FOLD = str.maketrans(
     {
@@ -32,8 +46,12 @@ def normalise(name: str) -> str:
 
 def sniff_delimiter(path: Path, candidates: str = ";,\t|") -> str:
     """Pick the delimiter that appears most consistently in the first line."""
-    with open(path, "rb") as fh:
-        first_line = fh.readline()
+    if _is_gzip(path):
+        with gzip.open(path, "rb") as fh:
+            first_line = fh.readline()
+    else:
+        with open(path, "rb") as fh:
+            first_line = fh.readline()
     text = first_line.decode("utf-8-sig", errors="replace")
     counts = {c: text.count(c) for c in candidates}
     best = max(counts, key=counts.get)
@@ -51,10 +69,15 @@ def find_column(columns: list[str], *candidates: str) -> str | None:
 
 
 def read_csv_flexible(path: Path, **kwargs) -> pl.DataFrame:
-    """Read a CSV with an auto-detected delimiter and a BOM-tolerant encoding."""
+    """Read a CSV with an auto-detected delimiter and a BOM-tolerant encoding.
+
+    Transparently gunzips ``*.gz`` files (polars' own gzip support varies by
+    version, so this decompresses in Python and hands it a byte buffer).
+    """
     delimiter = sniff_delimiter(path)
+    source = io.BytesIO(_read_bytes(path)) if _is_gzip(path) else path
     return pl.read_csv(
-        path,
+        source,
         separator=delimiter,
         encoding="utf8-lossy",
         infer_schema_length=10_000,

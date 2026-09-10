@@ -43,7 +43,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mp-mapping-file", type=Path, default=defaults.mp_mapping_file)
     parser.add_argument("--zaehler-gp-file", type=Path, default=defaults.zaehler_gp_file)
     parser.add_argument("--labels-file", type=Path, default=defaults.labels_file)
-    parser.add_argument("--weather-dir", type=Path, default=defaults.weather_dir)
+    parser.add_argument(
+        "--weather-dir", type=Path, nargs="+", default=[defaults.weather_dir],
+        help="One or more weather root directories (e.g. both weather_part_1 "
+             "and weather_part_2 if they don't share a parent). PLZ is read "
+             "from each file's parent directory name (real layout: "
+             "<root>/hourly/<PLZ>/YYYY-MM.csv.gz).",
+    )
     parser.add_argument("--weather-glob", default=defaults.weather_glob)
     parser.add_argument("--output-dir", type=Path, default=defaults.output_dir)
     parser.add_argument("--intermediate-dir", type=Path, default=None)
@@ -74,7 +80,8 @@ def main(argv: list[str] | None = None) -> int:
         mp_mapping_file=args.mp_mapping_file,
         zaehler_gp_file=args.zaehler_gp_file,
         labels_file=args.labels_file,
-        weather_dir=args.weather_dir,
+        weather_dir=args.weather_dir[0],
+        weather_dirs=tuple(args.weather_dir),
         weather_glob=args.weather_glob,
         output_dir=args.output_dir,
         intermediate_dir=intermediate_dir,
