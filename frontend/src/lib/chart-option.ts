@@ -46,7 +46,10 @@ export type EventBand = {
  * Converts events to minute bands inside [0, DAY_MINUTES]. A band that runs past
  * the day end keeps its in-day part and folds the overflow to the start of the
  * day (the previous night's tail); a band that starts before the day folds
- * symmetrically. Empty bands are dropped.
+ * symmetrically. An event can only fold onto one side at a time: if it starts
+ * before the day AND still runs past the day end, it already covers the whole
+ * day, so it collapses to a single [0, DAY_MINUTES] band instead of folding
+ * onto both ends (which would otherwise overlap). Empty bands are dropped.
  */
 export function eventsToBands(events: BuildingEvent[], startMs: number): EventBand[] {
   const bands: EventBand[] = [];
@@ -55,9 +58,16 @@ export function eventsToBands(events: BuildingEvent[], startMs: number): EventBa
     const start = minutesFromStart(event.start, startMs);
     const end = minutesFromStart(event.end, startMs);
     if (end <= 0 || start >= DAY_MINUTES) continue; // entirely outside the day
-    const segments: [number, number][] = [[Math.max(0, start), Math.min(DAY_MINUTES, end)]];
-    if (end > DAY_MINUTES) segments.push([0, Math.min(DAY_MINUTES, end - DAY_MINUTES)]);
-    if (start < 0) segments.push([Math.max(0, start + DAY_MINUTES), DAY_MINUTES]);
+
+    const segments: [number, number][] = [];
+    if (start <= 0 && end >= DAY_MINUTES) {
+      segments.push([0, DAY_MINUTES]); // covers the whole day; nothing left to fold
+    } else {
+      segments.push([Math.max(0, start), Math.min(DAY_MINUTES, end)]);
+      if (end > DAY_MINUTES) segments.push([0, end - DAY_MINUTES]);
+      if (start < 0) segments.push([start + DAY_MINUTES, DAY_MINUTES]);
+    }
+
     for (const [segmentStart, segmentEnd] of segments) {
       if (segmentEnd > segmentStart) {
         bands.push({ type: event.type, label: meta.label, color: meta.color, startMin: segmentStart, endMin: segmentEnd });
