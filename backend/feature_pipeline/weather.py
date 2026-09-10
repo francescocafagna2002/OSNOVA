@@ -103,9 +103,15 @@ def load_weather(paths: PathsConfig, cfg: ThresholdsConfig) -> WeatherData:
             continue
 
         plz_col = find_column(raw.columns, "PLZ", "plz", "postcode")
-        time_col = find_column(raw.columns, "time", "Time", "datetime")
+        time_col = find_column(
+            raw.columns, "time", "Time", "datetime", "date", "valid_time", "timestamp", "ts"
+        )
         if time_col is None:
-            logger.warning("Weather file %s has no 'time' column, skipping", path)
+            logger.warning(
+                "Weather file %s has no recognised time column, skipping. Actual columns: %r",
+                path,
+                raw.columns,
+            )
             continue
 
         # Priority: the real layout's PLZ-named parent directory, then an
