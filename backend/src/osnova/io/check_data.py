@@ -116,6 +116,12 @@ def scan_table1_file(path: Path, cfg: Config) -> dict[str, Any]:
         datum.filter(on_dst).unique().alias("dst_days"),
         *[(_to_float(slot_map[s]).is_null() & on_dst).sum().alias(f"dst_null_{s}") for s in present],
     ]
+    if slot_cols:
+        is_null = [_to_float(c).is_null() for c in slot_cols]  # unparseable cells count as null
+        aggs += [
+            pl.sum_horizontal([e.cast(pl.UInt32) for e in is_null]).sum().alias("null_cells"),
+            pl.any_horizontal(is_null).sum().alias("rows_with_null"),
+        ]
     if "PLZ" in cols:
         aggs.append(pl.col("PLZ").str.strip_chars().unique().alias("plz"))
     stats = lf.group_by("OBIS-Code").agg(aggs).collect(engine="streaming")
@@ -139,6 +145,8 @@ def scan_table1_file(path: Path, cfg: Config) -> dict[str, Any]:
         "non_slot_columns": [c for c in cols if c not in slot_cols],
         "date_min": str(stats["date_min"].min()),
         "date_max": str(stats["date_max"].max()),
+        "null_cells": int(stats["null_cells"].sum()) if "null_cells" in stats.columns else None,
+        "rows_with_null": int(stats["rows_with_null"].sum()) if "rows_with_null" in stats.columns else None,
         "obis_counts": obis_counts,
         "plz": sorted(plz),
         "daily_sums": daily_sums,
@@ -148,15 +156,17 @@ def scan_table1_file(path: Path, cfg: Config) -> dict[str, Any]:
     }
 
 
-def _check_table1(files: list[Path], cfg: Config, max_files: int, root: Path) -> dict[str, Any]:
+def _check_table1(
+    files: list[Path], cfg: Config, max_files: int, root: Path, scan: bool = True
+) -> dict[str, Any]:
     per_year: dict[str, list[str]] = {}
     for p in files:
         per_year.setdefault(_year_of(p), []).append(
             str(p.relative_to(root)) if p.is_relative_to(root) else p.name
         )
-    sampled = files[:max_files]
+    sampled = files[:max_files] if scan else []
     # the sampled files rarely contain March: files whose path looks like March are scanned for DST too
-    dst_candidates = [f for f in files if f not in sampled and is_march_file(f, root)]
+    dst_candidates = [f for f in files if f not in sampled and is_march_file(f, root)] if scan else []
     stats = {p: scan_table1_file(p, cfg) for p in [*sampled, *dst_candidates]}
     obis_counts: Counter[str] = Counter()
     plz_values: set[str] = set()
@@ -171,9 +181,11 @@ def _check_table1(files: list[Path], cfg: Config, max_files: int, root: Path) ->
     cells: dict[str, int] = dict.fromkeys(DST_SLOTS, 0)
     days_checked: list[str] = []
     files_checked: list[str] = []
+    rows_on_dst_days = 0
     for p, st in stats.items():
         if st["dst_rows"] == 0:
             continue
+        rows_on_dst_days += st["dst_rows"]
         files_checked.append(p.name)
         days_checked.extend(d for d in st["dst_days"] if d not in days_checked)
         for s, n in st["dst_nulls"].items():
@@ -194,6 +206,7 @@ def _check_table1(files: list[Path], cfg: Config, max_files: int, root: Path) ->
         "dst_null_cells": {
             **cells,
             "total": sum(cells.values()),
+            "rows_on_dst_days": rows_on_dst_days,
             "days_checked": days_checked,
             "files_checked": files_checked,
         },
@@ -269,12 +282,19 @@ def _check_registry(data_dir: Path, cfg: Config) -> dict[str, Any]:
         "table4_zp": _key_pattern(t4[zp4]),
         "table4_gp": _key_pattern(t4[gp4]),
     }
-    raw = _join_counts(t2, t3, t4, gp2, mp3, zp3, zp4, gp4, _raw_key)
-    norm = _join_counts(t2, t3, t4, gp2, mp3, zp3, zp4, gp4, _norm_key)
-    out.update(raw)
-    out["joined_with_normalized_keys"] = (
-        norm  # strip, drop '.0', drop leading zeros: shows if a format mismatch
-    )
+    t3k = t3.select(meter=_raw_key(mp3), zp=_raw_key(zp3)).drop_nulls()
+    t4k = t4.select(zp=_raw_key(zp4), gp=_raw_key(gp4)).drop_nulls().unique()
+    out.update(_join_counts(t2.select(gp=_raw_key(gp2)), t3k, t4k))
+    t4n = t4.select(zp=_raw_key(zp4), gp=_norm_key(gp4)).drop_nulls().unique()
+    out["joined_with_normalized_keys"] = _join_counts(t2.select(gp=_norm_key(gp2)), t3k, t4n)
+    # Table 2 cells may hold several GP numbers or text around them: pull every digit run of the
+    # width Table 4 uses and join on those
+    width = int(t4k["gp"].str.len_chars().mode()[0]) if t4k.height else 0
+    if width:
+        t2x = t2.select(gp=pl.col(gp2).cast(pl.String).str.extract_all(rf"\d{{{width}}}")).explode(
+            "gp", empty_as_null=True
+        )
+        out["joined_with_extracted_keys"] = {"key_width": width, **_join_counts(t2x, t3k, t4k)}
     out["asset_counts"] = _asset_counts(t2)
     return out
 
@@ -289,7 +309,7 @@ def _norm_key(c: str) -> pl.Expr:
 
 
 def _key_pattern(s: pl.Series) -> dict[str, Any]:
-    """Shape of a join-key column without listing values: lengths, digits-only, zeros, '.0', spaces."""
+    """Shape of a join-key column without listing values: lengths, digits-only, zeros, '.0', separators."""
     v = s.cast(pl.String).str.strip_chars().drop_nulls()
     if v.len() == 0:
         return {"n": 0, "n_null": int(s.null_count())}
@@ -298,30 +318,28 @@ def _key_pattern(s: pl.Series) -> dict[str, Any]:
         "n": int(v.len()),
         "n_unique": int(v.n_unique()),
         "n_null": int(s.null_count()),
-        "len_min": int(lengths.min()),
-        "len_max": int(lengths.max()),
+        "len_hist": {str(k): int(n) for k, n in sorted(lengths.value_counts().iter_rows())},
         "all_digits": bool(v.str.contains(r"^\d+$").all()),
+        "n_all_digits": int(v.str.contains(r"^\d+$").sum()),
         "with_leading_zero": int(v.str.starts_with("0").sum()),
         "with_decimal_suffix": int(v.str.contains(r"\.\d+$").sum()),
-        "with_inner_whitespace": int(v.str.contains(r"\s").sum()),
+        "with_separator": int(v.str.contains(r"[\s/,;|&+-]").sum()),
         "with_non_ascii": int(v.str.contains(r"[^\x00-\x7F]").sum()),
     }
 
 
-def _join_counts(t2, t3, t4, gp2, mp3, zp3, zp4, gp4, key) -> dict[str, Any]:  # noqa: PLR0913
-    t2k = t2.select(gp=key(gp2)).drop_nulls().unique()
-    t3k = t3.select(meter=key(mp3), zp=key(zp3)).drop_nulls()
-    t4k = t4.select(zp=key(zp4), gp=key(gp4)).drop_nulls().unique()
+def _join_counts(t2k: pl.DataFrame, t3k: pl.DataFrame, t4k: pl.DataFrame) -> dict[str, Any]:
+    """Table 3 (meter, zp) -> Table 4 (zp, gp) -> Table 2 (gp): counts at each step."""
+    t2k = t2k.drop_nulls().unique()
     zp_hit = t3k.join(t4k, on="zp", how="inner")
     joined = zp_hit.join(t2k, on="gp", how="inner").unique(["meter", "gp"])
     per_gp = joined.group_by("gp").agg(pl.col("meter").n_unique().alias("n"))
     hist = {str(k): int(v) for k, v in sorted(per_gp["n"].value_counts().iter_rows())}
-    n_gp4 = int(t4k["gp"].n_unique())
     return {
         "n_gp": t2k.height,
         "n_meters_table3": int(t3k["meter"].n_unique()),
         "n_meters_with_gp_in_table4": int(zp_hit["meter"].n_unique()),  # step 3->4
-        "n_gp_table4": n_gp4,
+        "n_gp_table4": int(t4k["gp"].n_unique()),
         "n_gp_table4_in_table2": int(t4k.join(t2k, on="gp", how="semi")["gp"].n_unique()),  # step 4->2
         "n_meters_joined": int(joined["meter"].n_unique()),
         "n_gp_with_meter": int(joined["gp"].n_unique()),
@@ -412,14 +430,19 @@ def _check_weather(weather_dir: Path, plz_in_table1: list[str]) -> dict[str, Any
 
 
 def run_check(
-    data_dir: Path, weather_dir: Path, cfg: Config, max_files: int = 3, registry_dir: Path | None = None
+    data_dir: Path,
+    weather_dir: Path,
+    cfg: Config,
+    max_files: int = 3,
+    registry_dir: Path | None = None,
+    scan_table1: bool = True,
 ) -> dict:
     """Measure Table 1 (sampled), the registry tables and the weather directory. Pure read-only.
 
     `registry_dir` defaults to `data_dir`; on Renku Tables 2-4 live on a different mount.
     """
     files = find_table1_files(data_dir)
-    t1 = _check_table1(files, cfg, max_files, data_dir)
+    t1 = _check_table1(files, cfg, max_files, data_dir, scan=scan_table1)
     plz_in_table1 = t1.pop("_plz_in_table1")
     return {
         "data_dir": str(data_dir),

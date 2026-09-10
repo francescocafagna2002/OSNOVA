@@ -42,6 +42,7 @@ def synth(
 def check_data(
     config: Path | None = ConfigOpt,
     max_files: int = typer.Option(3, "--max-files", help="Table 1 files to sample for OBIS/units/DST"),
+    skip_table1: bool = typer.Option(False, "--skip-table1", help="only registry + weather (seconds)"),
 ) -> None:
     """Measure facts about the real mount (OBIS codes, units, DST, joins, weather coverage)."""
     import json
@@ -59,6 +60,7 @@ def check_data(
         cfg,
         max_files=max_files,
         registry_dir=settings.registry_root,
+        scan_table1=not skip_table1,
     )
     out = store.data_check_json()
     out.parent.mkdir(parents=True, exist_ok=True)

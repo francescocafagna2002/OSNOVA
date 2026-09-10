@@ -171,17 +171,53 @@ def test_check_data_join_diagnostics_detect_key_format_mismatch(synth_dir: Path,
         "n": 3,
         "n_unique": 3,
         "n_null": 0,
-        "len_min": 6,
-        "len_max": 8,
+        "len_hist": {"6": 1, "7": 1, "8": 1},
         "all_digits": False,
+        "n_all_digits": 2,
         "with_leading_zero": 1,
         "with_decimal_suffix": 1,
-        "with_inner_whitespace": 0,
+        "with_separator": 0,
         "with_non_ascii": 0,
     }
     norm = r["joined_with_normalized_keys"]
     assert norm["n_meters_joined"] == 3 and norm["n_gp_with_meter"] == 2
     assert norm["meters_per_gp_hist"] == {"1": 1, "2": 1}
+
+
+def test_check_data_join_diagnostics_extract_keys_from_messy_cells(synth_dir: Path, tmp_path: Path):
+    reg = tmp_path / "registry"
+    reg.mkdir()
+    # Table 2 cells with two GP numbers, text around a number, a blank and a malformed value
+    (reg / "buildings.csv").write_text(
+        "GP-Nr;PLZ;PV\n500001 / 500002;5000;ja\nGP 500003 (alt);5000;ja\n;5000;ja\n12;5000;nein\n"
+    )
+    (reg / "meters.csv").write_text("MP ID;Zählpunktbezeichnung\n1;CH1\n2;CH2\n3;CH3\n4;CH4\n")
+    (reg / "installations.csv").write_text(
+        "Zählpunktbezeichnung;GPartner;Anlage\nCH1;500001;A\nCH2;500002;B\nCH3;500003;C\nCH4;500009;D\n"
+    )
+    r = run_check(synth_dir / "aew-data", synth_dir / "weather", Config(), max_files=0, registry_dir=reg)
+    reg_r = r["registry"]
+    assert reg_r["keys"]["table2_gp"]["n_null"] == 1
+    assert (
+        reg_r["keys"]["table2_gp"]["with_separator"] == 2 and reg_r["keys"]["table2_gp"]["n_all_digits"] == 1
+    )
+    assert reg_r["n_meters_joined"] == 0  # raw strings never match
+    ext = reg_r["joined_with_extracted_keys"]
+    assert ext["key_width"] == 6 and ext["n_gp"] == 3 and ext["n_meters_joined"] == 3
+    assert ext["n_gp_with_meter"] == 3 and ext["n_gp_without_meter"] == 0
+
+
+def test_check_data_skip_table1_and_null_counts(synth_dir: Path, truth: dict):
+    fast = run_check(synth_dir / "aew-data", synth_dir / "weather", Config(), scan_table1=False)
+    assert fast["files"]["count"] == 24 and fast["files"]["sampled"] == []
+    assert fast["obis_counts"] == {} and fast["unit_guess"] == "kw" and fast["daily_sum_median"] is None
+    assert fast["dst_null_cells"]["days_checked"] == [] and fast["dst_null_cells"]["rows_on_dst_days"] == 0
+    assert fast["registry"]["n_gp"] == sum(t["labeled"] for t in truth["meters"].values())
+    full = run_check(synth_dir / "aew-data", synth_dir / "weather", Config(), max_files=1)
+    assert (
+        full["files"]["sampled"][0]["null_cells"] == 0 and full["files"]["sampled"][0]["rows_with_null"] == 0
+    )
+    assert full["dst_null_cells"]["rows_on_dst_days"] > 0
 
 
 def test_check_data_cli_writes_json_and_prints_markdown(synth_dir: Path, tmp_path: Path, monkeypatch):
