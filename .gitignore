@@ -118,6 +118,12 @@ temp/
 *.bak
 *.orig
 
+# ─── Claude Code ─────────────────────────────────────────────────────────────
+# .claude/settings.json is the shared, team-wide config and IS committed.
+# Personal overrides and local state stay out.
+.claude/settings.local.json
+.claude/*.local.json
+
 # ─── Editors & IDEs ──────────────────────────────────────────────────────────
 .vscode/*
 !.vscode/extensions.json
