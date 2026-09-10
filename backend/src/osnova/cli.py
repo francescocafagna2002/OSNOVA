@@ -39,9 +39,34 @@ def synth(
 
 
 @app.command("check-data")
-def check_data(config: Path | None = ConfigOpt) -> None:
+def check_data(
+    config: Path | None = ConfigOpt,
+    max_files: int = typer.Option(3, "--max-files", help="Table 1 files to sample for OBIS/units/DST"),
+) -> None:
     """Measure facts about the real mount (OBIS codes, units, DST, joins, weather coverage)."""
-    _stub("Stream A", "A1")
+    import json
+    import time
+
+    from osnova.io.check_data import run_check, to_markdown
+    from osnova.io.store import Store
+
+    settings, cfg = _ctx(config)
+    store = Store(settings)
+    t0 = time.perf_counter()
+    report = run_check(settings.data_dir, settings.weather_dir, cfg, max_files=max_files)
+    out = store.data_check_json()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    store.write_manifest(
+        "check_data",
+        config=cfg.model_dump(),
+        inputs={"data_dir": settings.data_dir, "weather_dir": settings.weather_dir},
+        output=out,
+        table1_files=report["files"]["count"],
+        table1_sampled=len(report["files"]["sampled"]),
+        duration_s=round(time.perf_counter() - t0, 1),
+    )
+    typer.echo(to_markdown(report))
 
 
 @app.command()
