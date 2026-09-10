@@ -89,8 +89,8 @@ describe("patchMapStyle", () => {
     expect(paintOf(patched, "highway_motorway_casing")["line-width"]).toBe(3);
   });
 
-  it("softens boundaries to the medium border neutral", () => {
-    expect(paintOf(patchMapStyle(styleFixture()), "boundary_2")["line-color"]).toBe(NEUTRAL.borderMedium);
+  it("hides administrative boundaries so only the PLZ zones draw borders", () => {
+    expect(paintOf(patchMapStyle(styleFixture()), "boundary_2")["line-opacity"]).toBe(0);
   });
 
   it("gives labels the map label colour, a white halo and 0.9 opacity", () => {
