@@ -1,10 +1,10 @@
 import csv
 import gzip
 import io
-from pathlib import Path
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
 
 from scripts.preview_data import find_data_dir, main, preview

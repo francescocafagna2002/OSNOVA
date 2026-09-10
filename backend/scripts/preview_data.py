@@ -4,9 +4,9 @@
 import argparse
 import csv
 import gzip
+import sys
 from itertools import islice
 from pathlib import Path
-import sys
 
 
 def find_data_dir():
@@ -16,9 +16,7 @@ def find_data_dir():
             candidate = base / name
             if candidate.is_dir():
                 return candidate
-    raise FileNotFoundError(
-        "No aew-data or aew_data mount found. Pass its full path as an argument."
-    )
+    raise FileNotFoundError("No aew-data or aew_data mount found. Pass its full path as an argument.")
 
 
 def is_csv(path):
@@ -46,7 +44,9 @@ def preview(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "path", nargs="?", type=Path,
+        "path",
+        nargs="?",
+        type=Path,
         help="CSV file or directory; defaults to the nearby aew-data/aew_data mount",
     )
     args = parser.parse_args()

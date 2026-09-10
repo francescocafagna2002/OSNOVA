@@ -151,3 +151,7 @@ $RECYCLE.BIN/
 # ─── Playwright ──────────────────────────────────────────────────────────────
 frontend/test-results/
 frontend/playwright-report/
+
+# backend synthetic data and frontend copy of the generated JSON
+backend/data/
+frontend/public/data/

@@ -1,9 +1,49 @@
 [project]
-name = "data-processing-OSNOVA"
+name = "osnova"
 version = "0.1.0"
-description = "Data processing project."
-requires-python = ">=3.10"
+description = "OSNOVA prediction engine — energy-asset fingerprints from 15-minute smart-meter data"
+requires-python = ">=3.11"
 dependencies = [
-    "polars>=1.0.0",
-    "pandas>=2.0.0"
+  "polars>=1.30",
+  "pyarrow>=19",
+  "numpy>=2.0",
+  "scikit-learn>=1.6",
+  "lightgbm>=4.6",
+  "shap>=0.47",
+  "pydantic>=2.10",
+  "pydantic-settings>=2.8",
+  "typer>=0.15",
+  "fastexcel>=0.13",
+  "xlsxwriter>=3.2",
+  "fastapi>=0.115",
+  "uvicorn>=0.34",
 ]
+
+[project.scripts]
+osnova = "osnova.cli:app"
+
+[dependency-groups]
+dev = ["pytest>=8", "hypothesis>=6", "ruff>=0.11", "httpx>=0.28"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/osnova"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.uv]
+# shap pulls in numba/llvmlite; without these floors the universal resolver
+# picks a 2021 llvmlite that has no wheels and fails to build.
+constraint-dependencies = ["numba>=0.61", "llvmlite>=0.44"]
