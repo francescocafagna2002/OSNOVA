@@ -27,8 +27,8 @@ export function AboutDialog() {
           <DialogDescription>AEW Energy Fingerprints — Energy Data Hackdays 2026</DialogDescription>
         </DialogHeader>
         <div className="space-y-3 text-sm leading-relaxed text-foreground/90">
-          {ABOUT_PARAGRAPHS.map((paragraph) => (
-            <p key={paragraph.slice(0, 24)}>{paragraph}</p>
+          {ABOUT_PARAGRAPHS.map((paragraph, index) => (
+            <p key={index}>{paragraph}</p>
           ))}
         </div>
       </DialogContent>

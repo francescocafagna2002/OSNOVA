@@ -6,11 +6,11 @@ import { Layer, Source } from "react-map-gl/maplibre";
 
 import type { PlzCountProperties } from "@/lib/plz";
 
-export const PLZ_SOURCE_ID = "plz";
+const PLZ_SOURCE_ID = "plz";
 export const PLZ_FILL_LAYER_ID = "plz-fill";
 
 /** Spec §10: one quiet fill, thin borders, tint on hover, strong outline for the highlighted area. */
-export const MAP_COLORS = {
+const MAP_COLORS = {
   fill: "#dbeafe",
   border: "#94a3b8",
   highlight: "#1d4ed8",
