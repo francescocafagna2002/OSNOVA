@@ -35,3 +35,8 @@ if (!window.matchMedia) {
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = vi.fn();
 }
+
+// base-ui's ScrollArea viewport calls getAnimations on an internal timeout; jsdom has none.
+if (!Element.prototype.getAnimations) {
+  Element.prototype.getAnimations = () => [];
+}

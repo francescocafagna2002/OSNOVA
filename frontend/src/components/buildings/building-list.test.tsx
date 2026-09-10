@@ -7,13 +7,6 @@ import { initialUIState, useUIStore } from "@/stores/ui-store";
 import { makeBuilding } from "@/test/fixtures";
 import { renderWithProviders } from "@/test/render";
 
-// jsdom has no Element.getAnimations; base-ui's ScrollArea viewport calls it on an
-// internal timeout. Polyfilled here (not in the shared test/setup.ts, which this
-// task does not own) — see "Requests for Task 10" in the task-7 report.
-if (!Element.prototype.getAnimations) {
-  Element.prototype.getAnimations = () => [];
-}
-
 vi.mock("@/lib/api", () => ({
   fetchBuildings: async () => [
     makeBuilding({ id: "AG-000001", postcode: "5000", city: "Aarau" }),
