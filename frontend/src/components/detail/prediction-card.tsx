@@ -20,7 +20,7 @@ export function PredictionCard({ assetKey, probability, explanation }: Predictio
   return (
     <div
       data-testid={`prediction-card-${assetKey}`}
-      className="flex flex-col gap-2 rounded-2xl border border-border bg-white p-4"
+      className="flex flex-col gap-2 rounded-lg border border-border bg-white p-4"
     >
       <div className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
         <Icon className="size-5" style={{ color: meta.color }} aria-hidden />
