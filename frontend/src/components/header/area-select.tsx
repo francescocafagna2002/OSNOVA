@@ -3,7 +3,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 /** Static for the prototype: Aargau is the only area with data. */
-export const AREAS = [{ value: "AG", label: "Aargau (AG)" }] as const;
+const AREAS = [{ value: "AG", label: "Aargau (AG)" }] as const;
 
 export function AreaSelect() {
   return (
