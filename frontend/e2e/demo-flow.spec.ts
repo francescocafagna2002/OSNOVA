@@ -17,7 +17,9 @@ test.describe("Energy Fingerprints demo flow (spec §11)", () => {
 
     // 3. Select the demo building → sheet with four labelled predictions
     await card.click();
-    const sheet = page.getByRole("dialog");
+    // Named, because the "Why?" popover is a dialog too and can outlive its own close
+    // transition long enough to make a bare `getByRole("dialog")` ambiguous below.
+    const sheet = page.getByRole("dialog", { name: /Building AG-004711/ });
     await expect(sheet).toBeVisible();
     await expect(sheet.getByText("Building AG-004711")).toBeVisible();
     await expect(sheet.getByText("5000 Aarau, AG")).toBeVisible();
