@@ -59,6 +59,22 @@ describe("eventsToBands", () => {
       ["pv_generation", 1380, 1440],
     ]);
   });
+
+  it("collapses an event that straddles both day boundaries into a single full-day band", () => {
+    const bands = eventsToBands(
+      [{ type: "high_consumption", start: "2026-09-08T23:00:00+02:00", end: "2026-09-10T01:00:00+02:00" }],
+      startMs,
+    );
+    expect(bands.map((b) => [b.startMin, b.endMin])).toEqual([[0, 1440]]);
+  });
+
+  it("collapses an event spanning exactly the whole day into a single full-day band", () => {
+    const bands = eventsToBands(
+      [{ type: "high_consumption", start: "2026-09-09T00:00:00+02:00", end: "2026-09-10T00:00:00+02:00" }],
+      startMs,
+    );
+    expect(bands.map((b) => [b.startMin, b.endMin])).toEqual([[0, 1440]]);
+  });
 });
 
 describe("buildChartOption", () => {
