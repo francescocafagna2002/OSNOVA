@@ -2,11 +2,11 @@ import joblib
 import json
 
 model = joblib.load(
-    "../../store/models/pv_model.joblib"
+    "pv_model/pv_model.joblib"
 )
 
 with open(
-    "../../store/models/pv_feature_columns.json",
+    "pv_model/pv_feature_columns.json",
     "r",
     encoding="utf-8"
 ) as f:
