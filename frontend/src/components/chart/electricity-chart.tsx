@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 
 const CHART_HEIGHT = 260;
 
-export type ElectricityChartProps = {
+type ElectricityChartProps = {
   electricity: ElectricityPoint[];
   events: BuildingEvent[];
   className?: string;

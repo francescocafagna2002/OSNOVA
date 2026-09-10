@@ -34,7 +34,7 @@ export function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-export type EventBand = {
+type EventBand = {
   type: BuildingEventType;
   label: string;
   color: string;

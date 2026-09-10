@@ -3,14 +3,9 @@
 import { ChevronDown } from "lucide-react";
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { ASSETS, formatProbability } from "@/lib/predictions";
+import { ASSETS, formatContribution, formatProbability } from "@/lib/predictions";
 import type { AssetPrediction, BuildingExplanation } from "@/lib/types";
 import { cn } from "@/lib/utils";
-
-/** "+0.31" / "−0.04" (typographic minus). */
-export function formatContribution(value: number): string {
-  return `${value < 0 ? "−" : "+"}${Math.abs(value).toFixed(2)}`;
-}
 
 type TechnicalDetailsProps = { explanation: BuildingExplanation; predictions: AssetPrediction };
 

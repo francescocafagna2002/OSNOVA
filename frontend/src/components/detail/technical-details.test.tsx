@@ -2,16 +2,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
-import { formatContribution, TechnicalDetails } from "@/components/detail/technical-details";
+import { TechnicalDetails } from "@/components/detail/technical-details";
 import { makeBuilding } from "@/test/fixtures";
-
-describe("formatContribution", () => {
-  it("prints a sign and two decimals", () => {
-    expect(formatContribution(0.31)).toBe("+0.31");
-    expect(formatContribution(-0.04)).toBe("−0.04");
-    expect(formatContribution(0)).toBe("+0.00");
-  });
-});
 
 describe("TechnicalDetails", () => {
   it("is collapsed by default and reveals model metadata and per-asset SHAP lists", async () => {

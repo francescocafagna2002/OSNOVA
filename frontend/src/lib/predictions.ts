@@ -1,6 +1,6 @@
 import { BatteryCharging, Car, Flame, Sun, type LucideIcon } from "lucide-react";
 
-import type { AssetKey, AssetPrediction } from "@/lib/types";
+import type { AssetKey } from "@/lib/types";
 
 /** Tune during the hackathon; every label in the UI derives from these. Inclusive lower bounds. */
 export const PREDICTION_THRESHOLDS = { likely: 80, possible: 50 } as const;
@@ -44,16 +44,13 @@ export const ASSET_BY_KEY = Object.fromEntries(ASSETS.map((asset) => [asset.key,
   AssetMeta
 >;
 
-/** Asset keys labelled "Likely", highest probability first, at most `max`. */
-export function getMarkerAssets(predictions: AssetPrediction, max = 2): AssetKey[] {
-  return ASSETS.map((asset) => asset.key)
-    .filter((key) => getPredictionLabel(predictions[key]) === "Likely")
-    .sort((a, b) => predictions[b] - predictions[a])
-    .slice(0, max);
-}
-
 /** "EV — 76% possible". Phrases the prediction as a probability, never as a fact. */
 export function describePrediction(assetKey: AssetKey, probability: number): string {
   const label = getPredictionLabel(probability).toLowerCase();
   return `${ASSET_BY_KEY[assetKey].shortLabel} — ${formatProbability(probability)} ${label}`;
+}
+
+/** "+0.31" / "−0.04" (typographic minus). */
+export function formatContribution(value: number): string {
+  return `${value < 0 ? "−" : "+"}${Math.abs(value).toFixed(2)}`;
 }

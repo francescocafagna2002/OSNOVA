@@ -181,8 +181,6 @@ export function formatProbability(probability: number): string; // "76%"
 export type AssetMeta = { key: AssetKey; label: string; shortLabel: string; icon: LucideIcon; color: string };
 export const ASSETS: readonly AssetMeta[]; // fixed order: pv, battery, heatPump, ev
 export const ASSET_BY_KEY: Record<AssetKey, AssetMeta>;
-/** Asset keys labelled "Likely", highest first, at most `max` (default 2). */
-export function getMarkerAssets(predictions: AssetPrediction, max?: number): AssetKey[];
 /** "EV — 76% possible". Never states an asset as fact. */
 export function describePrediction(assetKey: AssetKey, probability: number): string;
 ```
@@ -282,7 +280,7 @@ All Client Components. Only the sheet's children and the chart take data props; 
 | `PredictionExplanation` | `components/detail/prediction-explanation.tsx` | none | Static "How is this calculated?" copy from task doc §12. |
 | `TechnicalDetails` | `components/detail/technical-details.tsx` | `explanation`, `predictions` | `Collapsible` "Show technical details"; model, input, additional data, explainability line; per-asset signed feature list. |
 | `ElectricityChart` | `components/chart/electricity-chart.tsx` | `electricity`, `events`, `className?` | `echarts-for-react` via `next/dynamic` (`ssr: false`); option from `buildChartOption`. Height 260 px. |
-| `ChartLegend` | `components/chart/chart-legend.tsx` | `events` | Line swatch "Consumption" plus one swatch per distinct event type present. |
+| `ChartLegend` | `components/chart/chart-legend.tsx` | `events` | Line swatch "Net power" plus one swatch per distinct event type present. |
 | `AppShell` | `components/app-shell.tsx` | none | Layout per D12; mounts sheet and about dialog once. |
 
 ## 10. Visual design
