@@ -102,7 +102,7 @@ python3 scripts/make_synth_fixture.py --out data/synth_input --buildings 100 --d
 - The exact weather file layout (one CSV per PLZ vs. one big file, filename
   vs. an embedded `PLZ` column) is not pinned down in the brief;
   `weather.load_weather` tries both. Confirm against the real files and adjust
-  `PathsConfig.weather_glob` / `weather_plz_regex` if needed.
+  `PathsConfig.weather_globs` / `weather_plz_regex` if needed.
 - The brief says OBIS-Code is unused for this task and that negative values
   already encode export directly on one channel. This is taken at face value;
   if the real files instead carry two always-positive OBIS rows (import/export

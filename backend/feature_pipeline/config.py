@@ -48,16 +48,20 @@ class PathsConfig:
 
     # Real layout (confirmed on Renku): one or more "part" directories, each
     # `<part>/hourly/<PLZ>/YYYY-MM.csv.gz` (+ a sibling `.json` metadata file
-    # per month, currently unused). Point this at the directory that contains
-    # the part folders, e.g. the parent of `weather_part_1/`, `weather_part_2/`.
-    # PLZ is read from each file's immediate parent directory name; the glob
-    # matches both plain `.csv` and gzipped `.csv.gz`.
+    # per month, currently unused, and occasional unrelated files sitting
+    # directly under `<part>/` such as `plz_coordinates.csv` or a `.zip` —
+    # both excluded by the exact-suffix globs below). Point this at the
+    # directory that contains the part folders, e.g. the parent of
+    # `weather_part_1/`, `weather_part_2/`. PLZ is read from each file's
+    # immediate parent directory name.
     weather_dir: Path = Path("aew-data/test-blob/input_data/weather")
     # If the "part" directories have no shared parent (or you'd rather list
     # them explicitly), set this instead — it takes priority over
     # ``weather_dir`` when non-empty. Each entry is searched independently.
     weather_dirs: tuple[Path, ...] = ()
-    weather_glob: str = "**/*.csv*"
+    # Exact suffixes only — NOT "**/*.csv*", which also matches
+    # "*.csv.zip" and any other "contains csv" filename.
+    weather_globs: tuple[str, ...] = ("**/*.csv", "**/*.csv.gz")
     weather_plz_regex: str = r"(\d{4,5})"
 
     @property

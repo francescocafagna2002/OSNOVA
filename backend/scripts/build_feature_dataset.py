@@ -50,7 +50,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
              "from each file's parent directory name (real layout: "
              "<root>/hourly/<PLZ>/YYYY-MM.csv.gz).",
     )
-    parser.add_argument("--weather-glob", default=defaults.weather_glob)
+    parser.add_argument(
+        "--weather-glob", action="append", default=None,
+        help=f"Glob pattern for weather files under each --weather-dir root; "
+             f"repeatable. Default: {list(defaults.weather_globs)}.",
+    )
     parser.add_argument("--output-dir", type=Path, default=defaults.output_dir)
     parser.add_argument("--intermediate-dir", type=Path, default=None)
     parser.add_argument(
@@ -82,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
         labels_file=args.labels_file,
         weather_dir=args.weather_dir[0],
         weather_dirs=tuple(args.weather_dir),
-        weather_glob=args.weather_glob,
+        weather_globs=tuple(args.weather_glob) if args.weather_glob else defaults.weather_globs,
         output_dir=args.output_dir,
         intermediate_dir=intermediate_dir,
     )

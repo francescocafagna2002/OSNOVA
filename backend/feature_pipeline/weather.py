@@ -76,15 +76,17 @@ def load_weather(paths: PathsConfig, cfg: ThresholdsConfig) -> WeatherData:
     search_roots = paths.weather_search_roots
     files: list = []
     for root in search_roots:
-        if root.exists():
-            files.extend(root.glob(paths.weather_glob))
+        if not root.exists():
+            continue
+        for pattern in paths.weather_globs:
+            files.extend(root.glob(pattern))
     files = sorted(set(files))
     if not files:
         logger.warning(
-            "No weather files found under %s (glob %r). All weather-based "
+            "No weather files found under %s (globs %r). All weather-based "
             "features will be null.",
             search_roots,
-            paths.weather_glob,
+            paths.weather_globs,
         )
         empty_hourly = pl.DataFrame(
             schema={"plz": pl.Utf8, "ts": pl.Datetime, **{c: pl.Float64 for c in HOURLY_VALUE_COLUMNS}}
