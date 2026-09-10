@@ -42,11 +42,32 @@ backend/
 | variable | meaning | default |
 | --- | --- | --- |
 | `OSNOVA_DATA_DIR` | AEW mount: Table 1 CSVs under `lastgang/`, Tables 2-4 under `registry/` | `data/synth/aew-data` |
-| `OSNOVA_WEATHER_DIR` | Open-Meteo CSVs, one per PLZ | `data/synth/weather` |
+| `OSNOVA_WEATHER_DIR` | folder holding `weather_part_1/`, `weather_part_2/` (ERA5 download, see below) | `data/synth/weather` |
 | `OSNOVA_STORE_DIR` | writable output store; everything lands under `$OSNOVA_STORE_DIR/osnova/` | `data/synth/store` |
 
 Every stage also accepts `--config PATH`, a JSON file overriding the defaults in `config.py`
 (for example `{"ingest": {"unit_factor": 1.0}}`).
+
+### Weather input layout
+
+The weather download (Open-Meteo, ERA5 model) is hourly **UTC** and looks like this; `osnova synth`
+writes the same layout so every test sees it:
+
+```text
+$OSNOVA_WEATHER_DIR/
+  weather_part_1/
+    metadata.json, plz_coordinates.csv, swisstopo_postcodes_4326.csv.zip   # ignored
+    hourly/<PLZ>/<YYYY-MM>.csv.gz                                          # PLZ,timestamp_utc,<variables>
+    hourly/<PLZ>/<YYYY-MM>.json                                            # ignored
+    _SUCCESS.json                                                          # only once the download is complete
+  weather_part_2/ ...
+```
+
+Weather files are recognised by their header (`temperature_2m`) at any depth, so a flat
+`open-meteo_<plz>.csv` with a local `time` column also works. The `weather` stage converts UTC to local
+naive `Europe/Zurich` and relabels the previous-hour variables (radiation, sunshine, precipitation,
+snowfall) from interval end to interval start; instantaneous variables are left as they are. Settings
+live in `WeatherConfig`.
 
 ### Stages
 
@@ -77,10 +98,11 @@ uv run pytest
 git clone <repo> && cd OSNOVA/backend
 uv sync
 export OSNOVA_DATA_DIR=/path/to/aew-data
-export OSNOVA_WEATHER_DIR=/path/to/weather
-export OSNOVA_STORE_DIR=/path/to/store
+export OSNOVA_WEATHER_DIR=/path/to/store        # the folder that contains weather_part_1/ and weather_part_2/
+export OSNOVA_STORE_DIR=/path/to/output
 mkdir -p "$OSNOVA_STORE_DIR/osnova/logs"
-uv run osnova check-data                    # first; paste the report into the team chat
+uv run osnova check-data --max-files 3 > check.md   # first; paste the report into the team chat
+uv run osnova weather                               # a minute; prints rows per PLZ
 nohup uv run osnova ingest > "$OSNOVA_STORE_DIR/osnova/logs/ingest.log" &
 ```
 

@@ -20,6 +20,7 @@ def test_defaults_match_spec():
     assert cfg.events.ev_residual_kw == 2.5
     assert cfg.labels.unlabeled_weight == 0.5
     assert cfg.cohort.unlabeled_sample == 3000
+    assert cfg.weather.timezone == "Europe/Zurich" and cfg.weather.utc_time_column == "timestamp_utc"
 
 
 def test_load_config_overrides(tmp_path: Path):

@@ -47,6 +47,23 @@ class IngestConfig(BaseModel):
     date_format: str = "%d.%m.%Y"
 
 
+class WeatherConfig(BaseModel):
+    """Open-Meteo ERA5 download: weather_part_N/hourly/<PLZ>/<YYYY-MM>.csv.gz, UTC hourly rows."""
+
+    timezone: str = "Europe/Zurich"  # pipeline stores local naive interval starts
+    utc_time_column: str = "timestamp_utc"  # ISO 8601 with Z
+    local_time_column: str = "time"  # plain Open-Meteo export, already local naive
+    # previous-hour means/totals: the row labelled 12:00 covers 11:00-12:00 -> relabel to interval start
+    end_labelled_vars: tuple[str, ...] = (
+        "shortwave_radiation",
+        "direct_radiation",
+        "diffuse_radiation",
+        "sunshine_duration",
+        "precipitation",
+        "snowfall",
+    )
+
+
 class FeatureConfig(BaseModel):
     min_days: int = 300
     night: tuple[int, int] = (0, 6)
@@ -87,6 +104,7 @@ class LabelConfig(BaseModel):
 class Config(BaseModel):
     cohort: CohortConfig = CohortConfig()
     ingest: IngestConfig = IngestConfig()
+    weather: WeatherConfig = WeatherConfig()
     features: FeatureConfig = FeatureConfig()
     events: EventConfig = EventConfig()
     labels: LabelConfig = LabelConfig()

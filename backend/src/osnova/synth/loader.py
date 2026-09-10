@@ -7,7 +7,9 @@ from pathlib import Path
 
 import polars as pl
 
-from osnova.io.store import LASTGANG, WEATHER_VARS
+from osnova.config import Config
+from osnova.io.store import LASTGANG
+from osnova.io.weather import normalize_weather_all
 from osnova.synth.generate import EXPORT_OBIS, IMPORT_OBIS, SLOT_COLUMNS
 
 UNIT_FACTOR = 4.0  # synth writes kWh per 15 min
@@ -59,27 +61,9 @@ def load_synth_meter(synth_dir: Path, meter_id: int, year: int) -> pl.DataFrame:
     return long
 
 
-def load_synth_weather(synth_dir: Path, plz: str) -> pl.DataFrame:
-    df = pl.read_csv(synth_dir / "weather" / f"open-meteo_{plz}.csv", schema_overrides={"plz": pl.String})
-    df = df.with_columns(
-        ts=pl.col("time").str.to_datetime("%Y-%m-%dT%H:%M").cast(pl.Datetime("ms")),
-        **{v: pl.col(v).cast(pl.Float32) for v in WEATHER_VARS},
-    )
-    daily = (
-        df.group_by(day=pl.col("ts").dt.date(), year=pl.col("ts").dt.year())
-        .agg(rad=pl.col("shortwave_radiation").sum())
-        .with_columns(
-            hi=pl.col("rad").quantile(0.75).over("year"), lo=pl.col("rad").quantile(0.25).over("year")
-        )
-        .select(
-            "day", is_sunny_day=pl.col("rad") >= pl.col("hi"), is_cloudy_day=pl.col("rad") <= pl.col("lo")
-        )
-    )
-    return (
-        df.with_columns(day=pl.col("ts").dt.date())
-        .join(daily, on="day", how="left")
-        .drop("day")
-        .with_columns(hdd15=(15.0 - pl.col("temperature_2m")).clip(lower_bound=0.0).cast(pl.Float32))
-        .select(["plz", "ts", *WEATHER_VARS, "is_sunny_day", "is_cloudy_day", "hdd15"])
-        .sort("ts")
-    )
+def load_synth_weather(synth_dir: Path, plz: str, cfg: Config | None = None) -> pl.DataFrame:
+    """The WEATHER frame of one synth PLZ, via the same normaliser the `weather` stage uses."""
+    files = sorted((synth_dir / "weather").rglob(f"hourly/{plz}/*.csv.gz"))
+    if not files:
+        raise FileNotFoundError(f"no synth weather for plz {plz} under {synth_dir / 'weather'}")
+    return normalize_weather_all(files, cfg or Config())[plz]

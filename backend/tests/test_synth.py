@@ -56,9 +56,23 @@ def test_registry_and_weather_files(synth_dir: Path, truth: dict):
     ]
     labeled = [m for m, t in truth["meters"].items() if t["labeled"]]
     assert t2.height == len(labeled)
-    w = pl.read_csv(synth_dir / "weather" / "open-meteo_5000.csv")
-    assert {"time", "temperature_2m", "shortwave_radiation", "sunshine_duration"} <= set(w.columns)
-    assert w.height == 24 * (366 + 365)  # 2023 + 2024 (leap)
+    # weather: the ERA5 download layout, UTC hours, one gz per PLZ and month, split in two parts
+    parts = sorted(p.name for p in (synth_dir / "weather").iterdir() if p.is_dir())
+    assert parts == ["weather_part_1", "weather_part_2"]
+    for part in parts:
+        assert {"metadata.json", "plz_coordinates.csv", "_SUCCESS.json"} <= {
+            p.name for p in (synth_dir / "weather" / part).iterdir()
+        }
+    months = sorted((synth_dir / "weather").rglob("hourly/5000/*.csv.gz"))
+    assert len(months) == 24 and months[0].name == "2023-01.csv.gz"
+    w = pl.concat([pl.read_csv(m) for m in months])
+    assert w.columns[:2] == ["PLZ", "timestamp_utc"]
+    assert {"temperature_2m", "shortwave_radiation", "sunshine_duration"} <= set(w.columns)
+    assert w.height == 24 * (366 + 365)  # 2023 + 2024 (leap), continuous in UTC
+    assert w["timestamp_utc"].str.ends_with("Z").all()
+    assert (
+        w["timestamp_utc"][0] == "2023-01-01T00:00:00Z" and w["timestamp_utc"][-1] == "2024-12-31T23:00:00Z"
+    )
 
 
 def test_truth_covers_every_asset(truth: dict):
@@ -76,4 +90,5 @@ def test_loader_roundtrip(synth_dir: Path, truth: dict):
     assert_schema(lg, LASTGANG, "lastgang")
     assert lg.height == 366 * 96 and lg["export_kw"].max() > 0.5
     w = load_synth_weather(synth_dir, lg["plz"][0])
-    assert {"is_sunny_day", "hdd15"} <= set(w.columns) and w.height == 24 * 366 + 24 * 365
+    # local naive hours: the duplicated 02:00 of each fall-back day is dropped
+    assert {"is_sunny_day", "hdd15"} <= set(w.columns) and w.height == 24 * 366 + 24 * 365 - 2

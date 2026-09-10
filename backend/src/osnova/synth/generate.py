@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
@@ -18,6 +19,7 @@ from osnova.synth.weather import synth_weather
 
 ORT = {"5000": "Aarau", "5400": "Baden", "5105": "Auenstein", "5200": "Brugg", "4800": "Zofingen"}
 IMPORT_OBIS, EXPORT_OBIS = "1-1:1.29.0*255", "1-1:2.29.0*255"
+WEATHER_TZ = "Europe/Zurich"  # synth weather is simulated on the local grid and written as UTC
 SLOT_COLUMNS = [f"{(i // 4) % 24:02d}:{(i % 4) * 15:02d}" for i in range(1, 97)]  # 00:15 ... 23:45, 00:00
 
 
@@ -141,21 +143,51 @@ def _write_registry(out: Path, meters: list[MeterSpec], rng: np.random.Generator
     ).write_csv(reg / "Table4_Installations.csv", separator=";")
 
 
-def _write_weather(out: Path, weather: dict[str, pl.DataFrame]) -> None:
-    (out / "weather").mkdir(parents=True, exist_ok=True)
-    for plz, df in weather.items():
-        meta = {
-            "plz": plz,
-            "latitude": 47.4,
-            "longitude": 8.05,
-            "elevation": 400.0,
-            "utc_offset_seconds": 3600,
-            "timezone": "Europe/Zurich",
-            "timezone_abbreviation": "CET",
-        }
-        df.with_columns([pl.lit(v).alias(k) for k, v in meta.items()]).with_columns(
-            time=pl.col("ts").dt.strftime("%Y-%m-%dT%H:%M")
-        ).select([*meta, "time", *WEATHER_VARS]).write_csv(out / "weather" / f"open-meteo_{plz}.csv")
+def _local_to_utc_hours(df: pl.DataFrame, years: tuple[int, ...]) -> pl.DataFrame:
+    """Local naive hourly grid -> continuous UTC grid Jan 1 00:00 .. Dec 31 23:00 UTC, like the download."""
+    utc = df.with_columns(
+        ts_utc=pl.col("ts")
+        .dt.replace_time_zone(WEATHER_TZ, ambiguous="earliest", non_existent="null")
+        .dt.convert_time_zone("UTC")
+        .dt.replace_time_zone(None)
+    ).drop_nulls("ts_utc")
+    start, end = datetime(min(years), 1, 1), datetime(max(years), 12, 31, 23)
+    grid = pl.DataFrame({"ts_utc": pl.datetime_range(start, end, "1h", eager=True)})
+    grid = grid.with_columns(ts_utc=pl.col("ts_utc").cast(utc.schema["ts_utc"]))
+    return (
+        grid.join(utc.drop("ts"), on="ts_utc", how="left")
+        .sort("ts_utc")
+        .fill_null(strategy="forward")
+        .fill_null(strategy="backward")
+    )
+
+
+def _write_weather(out: Path, weather: dict[str, pl.DataFrame], years: tuple[int, ...]) -> None:
+    """The real ERA5 download layout: weather_part_N/hourly/<PLZ>/<YYYY-MM>.csv.gz, comma, UTC."""
+    plzs = sorted(weather)
+    half = (len(plzs) + 1) // 2
+    parts = {"weather_part_1": plzs[:half], "weather_part_2": plzs[half:]}
+    for part, part_plzs in parts.items():
+        d = out / "weather" / part
+        (d / "hourly").mkdir(parents=True, exist_ok=True)
+        (d / "metadata.json").write_text(json.dumps({"model": "era5", "plz": part_plzs, "timezone": "UTC"}))
+        (d / "plz_coordinates.csv").write_text(
+            "PLZ,lat,lon\n" + "".join(f"{p},47.4,8.05\n" for p in part_plzs)
+        )
+        (d / "swisstopo_postcodes_4326.csv.zip").write_bytes(b"PK\x05\x06" + b"\x00" * 18)  # empty zip
+        for plz in part_plzs:
+            utc = _local_to_utc_hours(weather[plz], years).with_columns(
+                PLZ=pl.lit(plz),
+                timestamp_utc=pl.col("ts_utc").dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                month=pl.col("ts_utc").dt.strftime("%Y-%m"),
+            )
+            (d / "hourly" / plz).mkdir(exist_ok=True)
+            for (month,), block in utc.partition_by("month", as_dict=True, maintain_order=True).items():
+                csv = block.select(["PLZ", "timestamp_utc", *WEATHER_VARS]).write_csv(float_precision=3)
+                with gzip.open(d / "hourly" / plz / f"{month}.csv.gz", "wt", encoding="utf-8") as fh:
+                    fh.write(csv)
+                (d / "hourly" / plz / f"{month}.json").write_text(json.dumps({"rows": block.height}))
+        (d / "_SUCCESS.json").write_text(json.dumps({"plz": len(part_plzs)}))
 
 
 def generate(out: Path, spec: SynthSpec) -> dict:
@@ -183,7 +215,7 @@ def generate(out: Path, spec: SynthSpec) -> dict:
         ]
     _write_lastgang(out, meters, results, ts, spec)
     _write_registry(out, meters, rng)
-    _write_weather(out, weather)
+    _write_weather(out, weather, spec.years)
     truth = {
         "spec": asdict(spec),
         "meters": {

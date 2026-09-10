@@ -8,7 +8,6 @@ transformation: the report is written to `data_check.json`, printed as markdown,
 
 from __future__ import annotations
 
-import gzip
 import json
 import re
 from collections import Counter
@@ -19,6 +18,7 @@ from typing import Any
 import polars as pl
 
 from osnova.config import Config
+from osnova.io.weather import find_weather_files, first_line, plz_of_weather_file, read_raw
 
 TABLE1_HEADER_PREFIX = "MP ID;OBIS-Code"
 SLOT_RE = re.compile(r"^\d{1,2}:\d{2}$")
@@ -31,18 +31,6 @@ KW_THRESHOLD_DAILY_SUM = 40.0  # design §2.2: kWh/15 min days sum to ~5-40, kW 
 
 
 # --------------------------------------------------------------------------- helpers
-
-
-def _first_line(path: Path) -> str:
-    opener = gzip.open if path.suffix == ".gz" else open
-    with opener(path, "rb") as fh:  # type: ignore[operator]
-        raw = fh.readline()
-    for enc in ("utf-8-sig", "latin-1"):
-        try:
-            return raw.decode(enc).strip()
-        except UnicodeDecodeError:
-            continue
-    return raw.decode("utf-8", errors="replace").strip()
 
 
 def _scan_csv(path: Path, separator: str) -> pl.LazyFrame:
@@ -81,7 +69,7 @@ def _year_of(path: Path) -> str:
 
 def find_table1_files(data_dir: Path) -> list[Path]:
     files = [p for p in sorted(data_dir.rglob("*.csv*")) if p.is_file()]
-    return [p for p in files if _first_line(p).startswith(TABLE1_HEADER_PREFIX)]
+    return [p for p in files if first_line(p).startswith(TABLE1_HEADER_PREFIX)]
 
 
 def _check_table1(files: list[Path], cfg: Config, max_files: int) -> dict[str, Any]:
@@ -212,7 +200,7 @@ def find_registry_files(data_dir: Path, separator: str) -> dict[str, Path]:
         if not p.is_file() or p.suffix.lower() not in (".csv", ".xlsx", ".xlsm", ".xls"):
             continue
         if p.suffix.lower() == ".csv":
-            header = _first_line(p)
+            header = first_line(p)
             if header.startswith(TABLE1_HEADER_PREFIX):
                 continue
             cols = [c.strip().strip('"') for c in header.split(separator)]
@@ -285,38 +273,7 @@ def _asset_counts(t2: pl.DataFrame) -> dict[str, int]:
 # --------------------------------------------------------------------------- weather
 
 
-WEATHER_MARKER = "temperature_2m"  # a weather CSV is any csv/csv.gz whose header has this column
 WEATHER_TIME_COLS = ("timestamp_utc", "time", "timestamp", "datetime", "date")
-
-
-def find_weather_files(weather_dir: Path) -> list[Path]:
-    """Weather CSVs at any depth (`open-meteo_<plz>.csv` or `weather_part_N/hourly/<plz>/<YYYY-MM>.csv.gz`).
-
-    Recognised by header, so `plz_coordinates.csv`, zips and JSON sidecars are ignored.
-    """
-    if not weather_dir.exists():
-        return []
-    out: list[Path] = []
-    for p in sorted(weather_dir.rglob("*")):
-        if p.is_file() and (p.name.endswith(".csv") or p.name.endswith(".csv.gz")):
-            if WEATHER_MARKER in _first_line(p):
-                out.append(p)
-    return out
-
-
-def _read_weather(path: Path) -> pl.DataFrame:
-    return pl.read_csv(path, infer_schema_length=0, encoding="utf8-lossy")  # gz is transparent
-
-
-def _plz_of_weather_file(path: Path, df: pl.DataFrame | None) -> str | None:
-    if path.parent.name.isdigit():
-        return path.parent.name  # hourly/<plz>/<month>.csv.gz
-    if df is not None:
-        col = next((c for c in df.columns if c.lower() == "plz"), None)
-        if col is not None and df.height:
-            return str(df[col][0]).strip()
-    m = re.search(r"(?<!\d)(\d{4})(?!\d)", path.name.split(".")[0])
-    return m.group(1) if m else None
 
 
 def _parse_times(s: pl.Series) -> pl.Series:
@@ -342,13 +299,13 @@ def _check_weather(weather_dir: Path, plz_in_table1: list[str]) -> dict[str, Any
     }
     files_per_plz: dict[str, list[Path]] = {}
     for p in files:
-        plz = _plz_of_weather_file(p, None)
+        plz = plz_of_weather_file(p, None)
         if plz is None:
-            plz = _plz_of_weather_file(p, _read_weather(p))
+            plz = plz_of_weather_file(p, read_raw(p))
         files_per_plz.setdefault(plz or "unknown", []).append(p)
     out["files_sample"] = [str(p.relative_to(weather_dir)) for p in files[:3]]
     if files:
-        first = _read_weather(files[0])
+        first = read_raw(files[0])
         out["columns"] = first.columns
         out["rows_first_file"] = first.height
         tcol = next((c for c in first.columns if c.lower() in WEATHER_TIME_COLS), None)
@@ -358,7 +315,7 @@ def _check_weather(weather_dir: Path, plz_in_table1: list[str]) -> dict[str, Any
             out["time_zone_hint"] = "utc" if "utc" in tcol.lower() or sample.endswith("Z") else "unknown"
             # continuity over every file of the first PLZ (months must chain without holes)
             first_plz = next(iter(files_per_plz))
-            ts = pl.concat([_parse_times(_read_weather(p)[tcol]) for p in files_per_plz[first_plz]]).sort()
+            ts = pl.concat([_parse_times(read_raw(p)[tcol]) for p in files_per_plz[first_plz]]).sort()
             out["continuity_plz"] = first_plz
             out["continuity_files"] = len(files_per_plz[first_plz])
             out["time_min"], out["time_max"] = str(ts.min()), str(ts.max())

@@ -40,14 +40,16 @@ def test_check_data_files_dst_and_registry_details(synth_dir: Path, truth: dict)
     assert report["registry"]["n_meters_table3"] == n_meters
     assert report["registry"]["meters_per_gp_hist"] == {"1": report["registry"]["n_gp"]}
     assert set(report["registry"]["columns"]) == {"table2", "table3", "table4"}
-    # weather: one file per PLZ, Open-Meteo columns present, no hour gaps
-    assert report["weather"]["n_files"] == len(truth["spec"]["plzs"])
+    # weather: synth writes the ERA5 layout (24 monthly gz per PLZ, UTC), continuous, no gaps
+    assert report["weather"]["n_files"] == len(truth["spec"]["plzs"]) * 24
     assert report["weather"]["n_plz"] == len(truth["spec"]["plzs"])
-    assert report["weather"]["time_column"] == "time"
+    assert report["weather"]["time_column"] == "timestamp_utc"
+    assert report["weather"]["time_zone_hint"] == "utc"
     assert "temperature_2m" in report["weather"]["columns"]
-    assert report["weather"]["time_min"] == "2023-01-01 00:00:00"
+    assert report["weather"]["time_min"] == "2023-01-01 00:00:00"  # UTC, as downloaded
     assert report["weather"]["time_max"] == "2024-12-31 23:00:00"
-    assert report["weather"]["hour_gaps"] == 0
+    assert report["weather"]["hour_gaps"] == 0 and report["weather"]["duplicate_hours"] == 0
+    assert all(p["success_marker"] for p in report["weather"]["parts"].values())
     assert set(report["weather"]["plz_in_table1"]) <= set(report["weather"]["plz_with_weather"])
 
 

@@ -85,8 +85,39 @@ def ingest(
 
 @app.command()
 def weather(config: Path | None = ConfigOpt) -> None:
-    """Open-Meteo CSVs -> weather/plz=XXXX.parquet."""
-    _stub("Stream A", "A4")
+    """Open-Meteo CSVs (ERA5 download layout, UTC) -> weather/plz=XXXX.parquet (local naive)."""
+    import time
+
+    from osnova.io.store import Store
+    from osnova.io.weather import find_weather_files, group_files_by_plz, normalize_weather_all, write_weather
+
+    settings, cfg = _ctx(config)
+    store = Store(settings)
+    t0 = time.perf_counter()
+    files = find_weather_files(settings.weather_dir)
+    if not files:
+        typer.echo(f"no weather CSVs found under {settings.weather_dir}", err=True)
+        raise typer.Exit(code=1)
+    groups = group_files_by_plz(files)
+    rows: dict[str, int] = {}
+    spans: dict[str, list[str]] = {}
+    for plz, plz_files in sorted(groups.items()):
+        by_plz = normalize_weather_all(plz_files, cfg)
+        rows.update(write_weather(store, by_plz))
+        for p, df in by_plz.items():
+            spans[p] = [str(df["ts"].min()), str(df["ts"].max())]
+        typer.echo(f"plz={plz}: {len(plz_files)} files -> {rows.get(plz, 0)} hourly rows")
+    store.write_manifest(
+        "weather",
+        config=cfg.model_dump(),
+        inputs={"weather_dir": settings.weather_dir, "n_files": len(files)},
+        output=store.weather_dir(),
+        n_plz=len(rows),
+        rows_per_plz=rows,
+        span_per_plz=spans,
+        duration_s=round(time.perf_counter() - t0, 1),
+    )
+    typer.echo(f"wrote {len(rows)} PLZ to {store.weather_dir()}")
 
 
 @app.command()
