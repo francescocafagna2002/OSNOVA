@@ -53,14 +53,24 @@ def check_data(
     settings, cfg = _ctx(config)
     store = Store(settings)
     t0 = time.perf_counter()
-    report = run_check(settings.data_dir, settings.weather_dir, cfg, max_files=max_files)
+    report = run_check(
+        settings.data_dir,
+        settings.weather_dir,
+        cfg,
+        max_files=max_files,
+        registry_dir=settings.registry_root,
+    )
     out = store.data_check_json()
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2, ensure_ascii=False, default=str))
     store.write_manifest(
         "check_data",
         config=cfg.model_dump(),
-        inputs={"data_dir": settings.data_dir, "weather_dir": settings.weather_dir},
+        inputs={
+            "data_dir": settings.data_dir,
+            "registry_dir": settings.registry_root,
+            "weather_dir": settings.weather_dir,
+        },
         output=out,
         table1_files=report["files"]["count"],
         table1_sampled=len(report["files"]["sampled"]),

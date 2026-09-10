@@ -24,13 +24,18 @@ class OsnovaSettings(BaseSettings):
     """Where things are. Read from OSNOVA_* environment variables."""
 
     model_config = SettingsConfigDict(env_prefix="OSNOVA_")
-    data_dir: Path = Path("data/synth/aew-data")
-    weather_dir: Path = Path("data/synth/weather")
+    data_dir: Path = Path("data/synth/aew-data")  # Table 1 load-profile CSVs, any depth
+    registry_dir: Path | None = None  # Tables 2-4; on Renku they live on another mount. None = data_dir
+    weather_dir: Path = Path("data/synth/weather")  # holds weather_part_1/, weather_part_2/
     store_dir: Path = Path("data/synth/store")
 
     @property
     def out(self) -> Path:
         return self.store_dir / "osnova"
+
+    @property
+    def registry_root(self) -> Path:
+        return self.registry_dir or self.data_dir
 
 
 class CohortConfig(BaseModel):

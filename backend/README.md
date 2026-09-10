@@ -41,7 +41,8 @@ backend/
 
 | variable | meaning | default |
 | --- | --- | --- |
-| `OSNOVA_DATA_DIR` | AEW mount: Table 1 CSVs under `lastgang/`, Tables 2-4 under `registry/` | `data/synth/aew-data` |
+| `OSNOVA_DATA_DIR` | Table 1 load-profile CSVs, any depth (Renku: `store/cleaned_data`) | `data/synth/aew-data` |
+| `OSNOVA_REGISTRY_DIR` | Tables 2-4, any depth, found by header (Renku: `aew-data/test-blob/input_data`) | same as `OSNOVA_DATA_DIR` |
 | `OSNOVA_WEATHER_DIR` | folder holding `weather_part_1/`, `weather_part_2/` (ERA5 download, see below) | `data/synth/weather` |
 | `OSNOVA_STORE_DIR` | writable output store; everything lands under `$OSNOVA_STORE_DIR/osnova/` | `data/synth/store` |
 
@@ -97,7 +98,8 @@ uv run pytest
 ```sh
 git clone <repo> && cd OSNOVA/backend
 uv sync
-export OSNOVA_DATA_DIR=/path/to/aew-data
+export OSNOVA_DATA_DIR=/path/to/cleaned_data          # Table 1 monthly CSVs
+export OSNOVA_REGISTRY_DIR=/path/to/input_data        # Tables 2-4 (other mount)
 export OSNOVA_WEATHER_DIR=/path/to/store        # the folder that contains weather_part_1/ and weather_part_2/
 export OSNOVA_STORE_DIR=/path/to/output
 mkdir -p "$OSNOVA_STORE_DIR/osnova/logs"
@@ -105,6 +107,8 @@ uv run osnova check-data --max-files 3 > check.md   # first; paste the report in
 uv run osnova weather                               # a minute; prints rows per PLZ
 nohup uv run osnova ingest > "$OSNOVA_STORE_DIR/osnova/logs/ingest.log" &
 ```
+
+Measured facts about the real mounts: `docs/superpowers/specs/data-check-<date>.md`.
 
 Then `weather`, `features`, `events`, `train`, `export`, and copy
 `$OSNOVA_STORE_DIR/osnova/export/buildings.json` to `frontend/public/data/` (gitignored).

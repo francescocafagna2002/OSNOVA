@@ -60,8 +60,22 @@ def _last_sunday_of_march(year: int) -> date:
 
 
 def _year_of(path: Path) -> str:
-    m = YEAR_RE.search(str(path))
+    """Year folder first (`2023/März 2023/LG_…_20260827.csv` is 2023, not the export date in the name)."""
+    for part in reversed(path.parts[:-1]):
+        m = YEAR_RE.search(part)
+        if m:
+            return m.group(1)
+    m = YEAR_RE.search(path.name)
     return m.group(1) if m else "unknown"
+
+
+def is_march_file(path: Path, root: Path) -> bool:
+    """Name or folder says March: `2023-03`, `_03_`, `März 2023`, `Maerz` … (the real mount uses folders)."""
+    try:
+        rel = str(path.relative_to(root))
+    except ValueError:
+        rel = str(path)
+    return MARCH_FILE_RE.search(rel) is not None
 
 
 # --------------------------------------------------------------------------- table 1
@@ -72,46 +86,102 @@ def find_table1_files(data_dir: Path) -> list[Path]:
     return [p for p in files if first_line(p).startswith(TABLE1_HEADER_PREFIX)]
 
 
-def _check_table1(files: list[Path], cfg: Config, max_files: int) -> dict[str, Any]:
-    sep = cfg.ingest.csv_separator
+DST_YEARS = range(2018, 2035)  # last Sunday of March of each; matched against Datum, no year scan needed
+
+
+def _dst_days(cfg: Config) -> dict[str, date]:
+    return {
+        _last_sunday_of_march(y).strftime(cfg.ingest.date_format): _last_sunday_of_march(y) for y in DST_YEARS
+    }
+
+
+def scan_table1_file(path: Path, cfg: Config) -> dict[str, Any]:
+    """Everything check-data needs from one Table 1 file, in ONE streaming pass plus a 2000-row head.
+
+    A 1.5 GB file is read once; nothing is materialised except the aggregates.
+    """
+    lf = _scan_csv(path, cfg.ingest.csv_separator)
+    cols = lf.collect_schema().names()
+    slot_map = {n: c for c in cols if (n := _normalize_slot(c)) is not None}
+    slot_cols = list(slot_map.values())
+    datum = pl.col("Datum").str.strip_chars()
+    dst = _dst_days(cfg)
+    on_dst = datum.is_in(list(dst))
+    present = [s for s in DST_SLOTS if s in slot_map]
+    aggs: list[pl.Expr] = [
+        pl.len().alias("n"),
+        datum.str.strptime(pl.Date, cfg.ingest.date_format, strict=False).min().alias("date_min"),
+        datum.str.strptime(pl.Date, cfg.ingest.date_format, strict=False).max().alias("date_max"),
+        on_dst.sum().alias("dst_rows"),
+        datum.filter(on_dst).unique().alias("dst_days"),
+        *[(_to_float(slot_map[s]).is_null() & on_dst).sum().alias(f"dst_null_{s}") for s in present],
+    ]
+    if "PLZ" in cols:
+        aggs.append(pl.col("PLZ").str.strip_chars().unique().alias("plz"))
+    stats = lf.group_by("OBIS-Code").agg(aggs).collect(engine="streaming")
+    obis_counts = {str(k): int(v) for k, v in zip(stats["OBIS-Code"], stats["n"], strict=True)}
+    dst_days = sorted({d for lst in stats["dst_days"] for d in lst}, key=lambda d: dst[d])
+    plz: set[str] = set()
+    if "plz" in stats.columns:
+        plz = {str(v) for lst in stats["plz"] for v in lst if v is not None}
+    daily_sums = pl.Series("daily_sum", [], pl.Float64)
+    if slot_cols:
+        daily_sums = (
+            lf.filter(pl.col("OBIS-Code") == cfg.ingest.import_obis)
+            .head(DAILY_SUM_SAMPLE_ROWS)
+            .select(pl.sum_horizontal([_to_float(c) for c in slot_cols]).alias("daily_sum"))
+            .collect()["daily_sum"]
+        )
+    return {
+        "file": str(path),
+        "rows": int(stats["n"].sum()),
+        "n_slot_columns": len(slot_cols),
+        "non_slot_columns": [c for c in cols if c not in slot_cols],
+        "date_min": str(stats["date_min"].min()),
+        "date_max": str(stats["date_max"].max()),
+        "obis_counts": obis_counts,
+        "plz": sorted(plz),
+        "daily_sums": daily_sums,
+        "dst_rows": int(stats["dst_rows"].sum()),
+        "dst_days": dst_days,
+        "dst_nulls": {s: int(stats[f"dst_null_{s}"].sum()) for s in present},
+    }
+
+
+def _check_table1(files: list[Path], cfg: Config, max_files: int, root: Path) -> dict[str, Any]:
     per_year: dict[str, list[str]] = {}
     for p in files:
-        per_year.setdefault(_year_of(p), []).append(p.name)
-    sampled = files[:max_files]
-    obis_counts: Counter[str] = Counter()
-    daily_sums: list[pl.Series] = []
-    plz_values: set[str] = set()
-    sampled_info: list[dict[str, Any]] = []
-    for path in sampled:
-        lf = _scan_csv(path, sep)
-        cols = lf.collect_schema().names()
-        slot_map = {n: c for c in cols if (n := _normalize_slot(c)) is not None}
-        slot_cols = list(slot_map.values())
-        for code, n in lf.group_by("OBIS-Code").len().collect().iter_rows():
-            obis_counts[str(code)] += int(n)
-        imp = lf.filter(pl.col("OBIS-Code") == cfg.ingest.import_obis)
-        if slot_cols:
-            sums = (
-                imp.head(DAILY_SUM_SAMPLE_ROWS)
-                .select(pl.sum_horizontal([_to_float(c) for c in slot_cols]).alias("daily_sum"))
-                .collect()["daily_sum"]
-            )
-            daily_sums.append(sums)
-        datum = _datum(lf, cfg)
-        if "PLZ" in cols:
-            plz_values |= {str(v).strip() for v in lf.select("PLZ").unique().collect()["PLZ"].drop_nulls()}
-        sampled_info.append(
-            {
-                "file": str(path),
-                "rows": int(lf.select(pl.len()).collect().item()),
-                "n_slot_columns": len(slot_cols),
-                "non_slot_columns": [c for c in cols if c not in slot_cols],
-                "date_min": str(datum.min()),
-                "date_max": str(datum.max()),
-            }
+        per_year.setdefault(_year_of(p), []).append(
+            str(p.relative_to(root)) if p.is_relative_to(root) else p.name
         )
-    all_sums = pl.concat(daily_sums) if daily_sums else pl.Series("daily_sum", [], pl.Float64)
+    sampled = files[:max_files]
+    # the sampled files rarely contain March: files whose path looks like March are scanned for DST too
+    dst_candidates = [f for f in files if f not in sampled and is_march_file(f, root)]
+    stats = {p: scan_table1_file(p, cfg) for p in [*sampled, *dst_candidates]}
+    obis_counts: Counter[str] = Counter()
+    plz_values: set[str] = set()
+    sums: list[pl.Series] = []
+    for p in sampled:
+        st = stats[p]
+        obis_counts.update(st["obis_counts"])
+        plz_values |= set(st["plz"])
+        sums.append(st["daily_sums"])
+    all_sums = pl.concat(sums) if sums else pl.Series("daily_sum", [], pl.Float64)
     median = float(all_sums.median()) if all_sums.len() else None
+    cells: dict[str, int] = dict.fromkeys(DST_SLOTS, 0)
+    days_checked: list[str] = []
+    files_checked: list[str] = []
+    for p, st in stats.items():
+        if st["dst_rows"] == 0:
+            continue
+        files_checked.append(p.name)
+        days_checked.extend(d for d in st["dst_days"] if d not in days_checked)
+        for s, n in st["dst_nulls"].items():
+            cells[s] += n
+    sampled_info = [
+        {k: v for k, v in stats[p].items() if k not in ("obis_counts", "plz", "daily_sums", "dst_nulls")}
+        for p in sampled
+    ]
     return {
         "files": {"count": len(files), "per_year": per_year, "sampled": sampled_info},
         "obis_counts": dict(sorted(obis_counts.items())),
@@ -121,59 +191,13 @@ def _check_table1(files: list[Path], cfg: Config, max_files: int) -> dict[str, A
             q: (float(all_sums.quantile(float(q))) if all_sums.len() else None) for q in ("0.1", "0.5", "0.9")
         },
         "daily_sum_rows": int(all_sums.len()),
-        "dst_null_cells": _check_dst(files, sampled, cfg),
+        "dst_null_cells": {
+            **cells,
+            "total": sum(cells.values()),
+            "days_checked": days_checked,
+            "files_checked": files_checked,
+        },
         "_plz_in_table1": sorted(plz_values),
-    }
-
-
-def _datum(lf: pl.LazyFrame, cfg: Config) -> pl.Series:
-    return lf.select(
-        pl.col("Datum").str.strip_chars().str.strptime(pl.Date, cfg.ingest.date_format, strict=False)
-    ).collect()["Datum"]
-
-
-def _check_dst(files: list[Path], sampled: list[Path], cfg: Config) -> dict[str, Any]:
-    """Nulls in the 02:15..03:00 cells on the last Sunday of March.
-
-    The sampled files rarely contain March, so files whose name looks like a March file are scanned
-    too. A year whose spring-forward day is in none of the scanned files is reported as unchecked.
-    """
-    candidates = list(sampled) + [f for f in files if f not in sampled and MARCH_FILE_RE.search(f.name)]
-    cells: dict[str, int] = dict.fromkeys(DST_SLOTS, 0)
-    days_checked: list[str] = []
-    files_checked: list[str] = []
-    for path in candidates:
-        lf = _scan_csv(path, cfg.ingest.csv_separator)
-        slot_map = {n: c for c in lf.collect_schema().names() if (n := _normalize_slot(c)) is not None}
-        present = [s for s in DST_SLOTS if s in slot_map]
-        datum = _datum(lf, cfg).drop_nulls()
-        if not present or datum.len() == 0:
-            continue
-        lo, hi = datum.min(), datum.max()
-        for year in range(lo.year, hi.year + 1):
-            day = _last_sunday_of_march(year)
-            if not (lo <= day <= hi):
-                continue
-            day_str = day.strftime(cfg.ingest.date_format)
-            nulls = (
-                lf.filter(pl.col("Datum").str.strip_chars() == day_str)
-                .select(
-                    pl.len().alias("n_rows"),
-                    *[_to_float(slot_map[s]).is_null().sum().alias(s) for s in present],
-                )
-                .collect()
-            )
-            if int(nulls["n_rows"][0]) == 0:
-                continue
-            days_checked.append(day_str)
-            files_checked.append(path.name)
-            for s in present:
-                cells[s] += int(nulls[s][0])
-    return {
-        **cells,
-        "total": sum(cells.values()),
-        "days_checked": days_checked,
-        "files_checked": files_checked,
     }
 
 
@@ -238,23 +262,72 @@ def _check_registry(data_dir: Path, cfg: Config) -> dict[str, Any]:
         _has(t4.columns, "GPartner"),
     )
     mp3 = _has(t3.columns, "MP ID")
-    key = lambda c: pl.col(c).cast(pl.String).str.strip_chars()  # noqa: E731
+    out["keys"] = {
+        "table2_gp": _key_pattern(t2[gp2]),
+        "table3_meter": _key_pattern(t3[mp3]),
+        "table3_zp": _key_pattern(t3[zp3]),
+        "table4_zp": _key_pattern(t4[zp4]),
+        "table4_gp": _key_pattern(t4[gp4]),
+    }
+    raw = _join_counts(t2, t3, t4, gp2, mp3, zp3, zp4, gp4, _raw_key)
+    norm = _join_counts(t2, t3, t4, gp2, mp3, zp3, zp4, gp4, _norm_key)
+    out.update(raw)
+    out["joined_with_normalized_keys"] = (
+        norm  # strip, drop '.0', drop leading zeros: shows if a format mismatch
+    )
+    out["asset_counts"] = _asset_counts(t2)
+    return out
+
+
+def _raw_key(c: str) -> pl.Expr:
+    return pl.col(c).cast(pl.String).str.strip_chars()
+
+
+def _norm_key(c: str) -> pl.Expr:
+    """Tolerant join key: whitespace stripped, Excel-style '.0' suffix and leading zeros removed."""
+    return _raw_key(c).str.replace(r"\.0+$", "").str.replace(r"^0+(\d)", "${1}")
+
+
+def _key_pattern(s: pl.Series) -> dict[str, Any]:
+    """Shape of a join-key column without listing values: lengths, digits-only, zeros, '.0', spaces."""
+    v = s.cast(pl.String).str.strip_chars().drop_nulls()
+    if v.len() == 0:
+        return {"n": 0, "n_null": int(s.null_count())}
+    lengths = v.str.len_chars()
+    return {
+        "n": int(v.len()),
+        "n_unique": int(v.n_unique()),
+        "n_null": int(s.null_count()),
+        "len_min": int(lengths.min()),
+        "len_max": int(lengths.max()),
+        "all_digits": bool(v.str.contains(r"^\d+$").all()),
+        "with_leading_zero": int(v.str.starts_with("0").sum()),
+        "with_decimal_suffix": int(v.str.contains(r"\.\d+$").sum()),
+        "with_inner_whitespace": int(v.str.contains(r"\s").sum()),
+        "with_non_ascii": int(v.str.contains(r"[^\x00-\x7F]").sum()),
+    }
+
+
+def _join_counts(t2, t3, t4, gp2, mp3, zp3, zp4, gp4, key) -> dict[str, Any]:  # noqa: PLR0913
     t2k = t2.select(gp=key(gp2)).drop_nulls().unique()
     t3k = t3.select(meter=key(mp3), zp=key(zp3)).drop_nulls()
     t4k = t4.select(zp=key(zp4), gp=key(gp4)).drop_nulls().unique()
-    joined = t3k.join(t4k, on="zp", how="inner").join(t2k, on="gp", how="inner").unique(["meter", "gp"])
+    zp_hit = t3k.join(t4k, on="zp", how="inner")
+    joined = zp_hit.join(t2k, on="gp", how="inner").unique(["meter", "gp"])
     per_gp = joined.group_by("gp").agg(pl.col("meter").n_unique().alias("n"))
     hist = {str(k): int(v) for k, v in sorted(per_gp["n"].value_counts().iter_rows())}
-    out.update(
-        n_gp=t2k.height,
-        n_meters_table3=int(t3k["meter"].n_unique()),
-        n_meters_joined=int(joined["meter"].n_unique()),
-        n_gp_with_meter=int(joined["gp"].n_unique()),
-        n_gp_without_meter=int(t2k.height - joined["gp"].n_unique()),
-        meters_per_gp_hist=hist,
-        asset_counts=_asset_counts(t2),
-    )
-    return out
+    n_gp4 = int(t4k["gp"].n_unique())
+    return {
+        "n_gp": t2k.height,
+        "n_meters_table3": int(t3k["meter"].n_unique()),
+        "n_meters_with_gp_in_table4": int(zp_hit["meter"].n_unique()),  # step 3->4
+        "n_gp_table4": n_gp4,
+        "n_gp_table4_in_table2": int(t4k.join(t2k, on="gp", how="semi")["gp"].n_unique()),  # step 4->2
+        "n_meters_joined": int(joined["meter"].n_unique()),
+        "n_gp_with_meter": int(joined["gp"].n_unique()),
+        "n_gp_without_meter": int(t2k.height - joined["gp"].n_unique()),
+        "meters_per_gp_hist": hist,
+    }
 
 
 def _asset_counts(t2: pl.DataFrame) -> dict[str, int]:
@@ -338,13 +411,19 @@ def _check_weather(weather_dir: Path, plz_in_table1: list[str]) -> dict[str, Any
 # --------------------------------------------------------------------------- public
 
 
-def run_check(data_dir: Path, weather_dir: Path, cfg: Config, max_files: int = 3) -> dict:
-    """Measure Table 1 (sampled), the registry tables and the weather directory. Pure read-only."""
+def run_check(
+    data_dir: Path, weather_dir: Path, cfg: Config, max_files: int = 3, registry_dir: Path | None = None
+) -> dict:
+    """Measure Table 1 (sampled), the registry tables and the weather directory. Pure read-only.
+
+    `registry_dir` defaults to `data_dir`; on Renku Tables 2-4 live on a different mount.
+    """
     files = find_table1_files(data_dir)
-    t1 = _check_table1(files, cfg, max_files)
+    t1 = _check_table1(files, cfg, max_files, data_dir)
     plz_in_table1 = t1.pop("_plz_in_table1")
     return {
         "data_dir": str(data_dir),
+        "registry_dir": str(registry_dir or data_dir),
         "config": {
             "import_obis": cfg.ingest.import_obis,
             "export_obis": cfg.ingest.export_obis,
@@ -353,7 +432,7 @@ def run_check(data_dir: Path, weather_dir: Path, cfg: Config, max_files: int = 3
             "date_format": cfg.ingest.date_format,
         },
         **t1,
-        "registry": _check_registry(data_dir, cfg),
+        "registry": _check_registry(registry_dir or data_dir, cfg),
         "weather": _check_weather(weather_dir, plz_in_table1),
     }
 

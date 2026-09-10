@@ -1,6 +1,7 @@
 # tests/test_check_data.py
 import gzip
 import json
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -123,6 +124,64 @@ def test_check_data_weather_detects_hour_gap(synth_dir: Path, tmp_path: Path):
     _write_renku_weather(wdir, {"weather_part_1": ["5073"]}, ["2023-01", "2023-02"], drop_hour=True)
     w = run_check(synth_dir / "aew-data", wdir, Config(), max_files=1)["weather"]
     assert w["hour_gaps"] == 31  # one missing 12:00 per January day
+
+
+def test_check_data_real_mount_layout(synth_dir: Path, tmp_path: Path, truth: dict):
+    """Renku: consumption under <year>/<German month>/LG_…_<export stamp>.csv, registry on another mount."""
+    cons = tmp_path / "cleaned_data"
+    copies = {
+        "2023/01/lastgang_2023_01.csv": "2023/Januar 2023/LG_AIM2Hackerdays_kWh_20260825_131305.csv",
+        "2023/03/lastgang_2023_03.csv": "2023/März 2023/LG_AIM2Hackerdays_kWh_20260827_084034.csv",
+    }
+    for src, dst in copies.items():
+        (cons / dst).parent.mkdir(parents=True)
+        shutil.copy(synth_dir / "aew-data" / "lastgang" / src, cons / dst)
+    reg = tmp_path / "input_data"
+    shutil.copytree(synth_dir / "aew-data" / "registry", reg)
+    report = run_check(cons, synth_dir / "weather", Config(), max_files=1, registry_dir=reg)
+    assert report["registry_dir"] == str(reg)
+    # year from the folder, not from the 2026 export stamp in the file name
+    assert report["files"]["per_year"] == {"2023": sorted(copies.values())}
+    # only January is sampled; March is found through the folder name and scanned for DST
+    assert len(report["files"]["sampled"]) == 1
+    assert report["dst_null_cells"]["days_checked"] == ["26.03.2023"]
+    assert report["dst_null_cells"]["files_checked"] == ["LG_AIM2Hackerdays_kWh_20260827_084034.csv"]
+    labeled = sum(t["labeled"] for t in truth["meters"].values())
+    assert report["registry"]["n_gp"] == labeled and report["registry"]["n_meters_joined"] == labeled
+    keys = report["registry"]["keys"]
+    assert keys["table2_gp"]["all_digits"] is True and keys["table4_gp"]["with_decimal_suffix"] == 0
+    assert report["registry"]["joined_with_normalized_keys"]["n_meters_joined"] == labeled
+
+
+def test_check_data_join_diagnostics_detect_key_format_mismatch(synth_dir: Path, tmp_path: Path):
+    reg = tmp_path / "registry"
+    reg.mkdir()
+    (reg / "buildings.csv").write_text("GP-Nr;PLZ;PV\n500001;5000;ja\n500002;5000;ja\n")
+    (reg / "meters.csv").write_text("MP ID;Zählpunktbezeichnung\n1;CH1\n2;CH2\n3;CH3\n")
+    # Excel-style float and a leading zero on the GP side: raw join fails, normalized join works
+    (reg / "installations.csv").write_text(
+        "Zählpunktbezeichnung;GPartner;Anlage\nCH1;500001.0;A\nCH2;0500001;B\nCH3;500002;C\n"
+    )
+    r = run_check(synth_dir / "aew-data", synth_dir / "weather", Config(), max_files=1, registry_dir=reg)[
+        "registry"
+    ]
+    assert r["n_gp"] == 2 and r["n_gp_table4"] == 3 and r["n_meters_with_gp_in_table4"] == 3
+    assert r["n_meters_joined"] == 1 and r["n_gp_table4_in_table2"] == 1
+    assert r["keys"]["table4_gp"] == {
+        "n": 3,
+        "n_unique": 3,
+        "n_null": 0,
+        "len_min": 6,
+        "len_max": 8,
+        "all_digits": False,
+        "with_leading_zero": 1,
+        "with_decimal_suffix": 1,
+        "with_inner_whitespace": 0,
+        "with_non_ascii": 0,
+    }
+    norm = r["joined_with_normalized_keys"]
+    assert norm["n_meters_joined"] == 3 and norm["n_gp_with_meter"] == 2
+    assert norm["meters_per_gp_hist"] == {"1": 1, "2": 1}
 
 
 def test_check_data_cli_writes_json_and_prints_markdown(synth_dir: Path, tmp_path: Path, monkeypatch):
