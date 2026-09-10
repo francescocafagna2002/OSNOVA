@@ -104,7 +104,16 @@ def load_weather(paths: PathsConfig, cfg: ThresholdsConfig) -> WeatherData:
 
         plz_col = find_column(raw.columns, "PLZ", "plz", "postcode")
         time_col = find_column(
-            raw.columns, "time", "Time", "datetime", "date", "valid_time", "timestamp", "ts"
+            raw.columns,
+            "time",
+            "Time",
+            "datetime",
+            "date",
+            "valid_time",
+            "timestamp",
+            "timestamp_utc",
+            "time_utc",
+            "ts",
         )
         if time_col is None:
             logger.warning(
@@ -151,11 +160,28 @@ def load_weather(paths: PathsConfig, cfg: ThresholdsConfig) -> WeatherData:
                 continue
             frame = frame.with_columns(pl.lit(plz).alias("plz"))
 
-        frame = frame.with_columns(
-            pl.col("_time_raw")
-            .str.to_datetime(strict=False, ambiguous="earliest")
-            .alias("ts")
-        ).drop("_time_raw")
+        # Open-Meteo's "..._utc" columns are UTC; everything else in this
+        # pipeline (consumption timestamps, dayparts, seasons) is local
+        # Europe/Zurich naive time, so a UTC source must be converted here —
+        # otherwise every join is off by 1-2 hours (CET/CEST). Strip any
+        # trailing "Z"/offset first so this is robust whether or not the
+        # source string already carries one; the result is always treated as
+        # the UTC wall-clock reading.
+        is_utc_source = "utc" in time_col.lower()
+        if is_utc_source:
+            ts_expr = (
+                pl.col("_time_raw")
+                .str.replace(r"Z$", "", literal=False)
+                .str.replace(r"[+-]\d{2}:?\d{2}$", "", literal=False)
+                .str.to_datetime(strict=False)
+                .dt.replace_time_zone("UTC")
+                .dt.convert_time_zone("Europe/Zurich")
+                .dt.replace_time_zone(None)
+            )
+        else:
+            ts_expr = pl.col("_time_raw").str.to_datetime(strict=False, ambiguous="earliest")
+
+        frame = frame.with_columns(ts_expr.alias("ts")).drop("_time_raw")
         frames.append(frame.select("plz", "ts", *HOURLY_VALUE_COLUMNS))
 
     if not frames:
