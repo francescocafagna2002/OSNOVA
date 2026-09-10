@@ -16,7 +16,7 @@ export function TechnicalDetails({ explanation, predictions }: TechnicalDetailsP
         Show technical details
         <ChevronDown className="size-4 transition-transform group-data-[panel-open]:rotate-180" aria-hidden />
       </CollapsibleTrigger>
-      <CollapsibleContent className="mt-3 space-y-4 rounded-2xl bg-[#F6F9FB] p-4 text-sm">
+      <CollapsibleContent className="mt-3 space-y-4 rounded-lg bg-[#F6F9FB] p-4 text-sm">
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
           <dt className="text-muted-foreground">Model</dt>
           <dd>{explanation.model}</dd>
