@@ -1,4 +1,4 @@
-# Data check 2026-09-10 (Renku, commit a6dc73e)
+# Data check 2026-09-10 (Renku, four runs, commits a6dc73e → 9ab15bb)
 
 Measured by `osnova check-data --max-files 3` and `osnova weather` on the real mounts. No customer
 records are in this file, only file names, column names and counts. Laptop sessions work from these facts.
@@ -15,17 +15,20 @@ records are in this file, only file names, column names and counts. Laptop sessi
 | Datum format | `dd.mm.yyyy` | as assumed |
 | Rows per file | 1.31 M (April 2023, only 23 days: 01–23), 1.96 M (Aug 2023), 2.32 M (Dec 2023) | ≈ 28k → 37k meters per day across 2023: the meter population grows month by month. **April 2023 is incomplete.** |
 | File size / time | ≈ 1.5 GB per file; check-data took 164 s for 3 files at a6dc73e (now single-pass) | ingest must stream (`sink_parquet`), never collect a file |
-| DST cells | second run (f2682e6): on the four spring-forward days 2023-03-26, 2024-03-31, 2025-03-30, 2026-03-29 the cells `02:15, 02:30, 02:45, 03:00` are empty in ≈ 16.8k rows each (67,134 empty cells in total; per-slot counts differ by a few, so a handful of empty cells occur elsewhere too) | ingest marks those four cells on that day `quality = "dst"` and drops them; empty cells → null, never 0 |
-| Join keys | second run: Table 2 `GP-Nr` has 25 nulls, lengths 5–15, not all digits, one value with inner whitespace; Table 4 `GPartner` is always 6 digits (76,718 unique GPs for 89,910 rows; 136 Zählpunkte carry two GPs). Normalising `.0`/leading zeros changed nothing | Table 2 cells do not always hold one clean 6-digit number. Third run adds a length histogram and a join on every 6-digit run extracted from the cell |
+| DST cells | on the four spring-forward days (2023-03-26, 2024-03-31, 2025-03-30, 2026-03-29) the cells `02:15, 02:30, 02:45, 03:00` are empty in ≈ 16.8k of ≈ 105k rows per day (67,134 empty cells over 418,574 rows) | ingest marks those four cells on that day `quality = "dst"`; empty cells → null, never 0 |
+| Empty cells elsewhere | April 2023 file: 5.83 M empty cells of 126 M (4.6 %), 79,160 of 1.31 M rows have at least one | gaps are common: ingest keeps nulls, features count valid intervals per day and use `min_days` |
+| Meter population | ≈ 28k meters/day in April 2023, ≈ 37k in Dec 2023, 82,476 in March 2026 (Table 3 lists 89,993) | the smart-meter rollout runs through the data window; a meter-year needs `n_days ≥ min_days`, and 2023 covers far fewer meters than 2025/2026 |
+| Join keys | Table 2 `GP-Nr`: 1,162 of 1,167 filled values are clean 6-digit numbers (4 × 5 digits, 1 × 15 chars, 25 blank). Table 4 `GPartner`: always 6 digits, 76,718 distinct for 89,910 rows; 136 Zählpunkte carry two GPs. Normalising or extracting digit runs changes nothing (+1 customer) | **the 62 % loss is real**: 536 of 874 customers in Table 2 have no Zählpunkt in Table 4. Labelled cohort = 414 meters of 338 customers (438 Table 2 rows) |
+| Join is genuine | of 374 joined meters present in March 2026, 356 sit in the PLZ Table 2 gives, 18 do not (4.8 %) | accidental id collisions are not the source of the 337 matches; the registry stage records `plz_mismatch` per meter |
+| Asset flags | values are `x`/`X` = yes, `-` = **explicit no**, blank = unknown (plus one `Boiler`, one `.`). Rows: PV 755 yes / 311 no / 126 blank; Batterie 713 / 367 / 111; WärmePumpe 334 / 665 / 192; Ladestation 192 / 742 / 258; Wärmepumpenboiler 10 / 631 / 551 | three-valued labels: yes, explicit negative, unknown. Among the joined customers (438 rows): PV 292, Batterie 269, WärmePumpe 111, Ladestation 74, Boiler 4 |
+| Commissioning dates | all `dd.mm.yyyy` strings. `InBetrieb-Datum` 815 filled / 811 parse, 2017-06 → 2026-07. `Übergabe` 811 / 674. `Datum Unterschrift` 1,175 / 1,175, 2008-04 → 2026-07. `geplanter Baustart` 1,108 / 578 (free text, typos like year 0022) | use `InBetrieb-Datum` → `Übergabe` → `Datum Unterschrift` as designed; ignore `geplanter Baustart`. Many assets predate 2023 (always active); some are commissioned after the last data month (negatives for every year) |
 | PLZ in Table 1 | column present; 80 PLZ in the sampled files, all have weather | join lastgang → weather on PLZ works |
 | Table 2 columns | `GP-Nr, PLZ, Ort, Kanton, WärmePumpe, " PV", "PV-Leistung in kWp ", Batterie/Speicher, Ladestation für Elektrofahrzeuge, Wärmepumpenboiler, Datum Unterschrift, geplanter Baustart, Übergabe, InBetrieb-Datum` | leading/trailing spaces in names, EV column is `Ladestation für Elektrofahrzeuge` (synth had `… für EV`): strip and match by substring |
 | Table 2 size | 1,192 rows, 878 unique GP-Nr | several rows per customer (projects); registry stage must aggregate per GP |
-| Asset flags (rows) | WärmePumpe 334, PV 755, Batterie/Speicher 713, Ladestation 192, Wärmepumpenboiler 10 | battery is unexpectedly common: check the flag values in the registry stage (`ja`/`nein`/other) |
-| Join 3 → 4 → 2 | Table 3: 89,993 meters. Table 4: 89,910 rows. **Only 413 meters join to 337 of 878 GPs; 541 GPs have no meter.** | 62 % join loss. Cause unknown: key format (`.0`, leading zeros) or customers outside the meter population. The new `keys` and `joined_with_normalized_keys` sections of the report answer this on the next run |
 | Meters per GP | 1: 291, 2: 35, 3: 9, 8: 1, 17: 1 | as designed: one meter = one entity, `meters_per_gp` recorded |
 | Weather | 120 PLZ × 45 months (2023-01-01 00:00 → 2026-09-04 23:00 UTC), no hour gaps, no duplicates, both parts complete | `weather` stage wrote 120 parquet files, 32,229 local hours each (32,232 minus 3 fall-back duplicates). Verified on `plz=5000`: unique sorted local hours, 23 h on 2024-03-31, 24 h on 2024-10-27, summer radiation peaks at 13:00 local |
 
-## Raw report
+## Raw report (first run; later runs added the `keys`, `flag_values`, `date_columns` and `plz_agreement` sections)
 
 # data check
 
