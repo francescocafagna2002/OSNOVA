@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship the single-screen Energy Fingerprints demo: Aargau PLZ choropleth map, ID-based building list, detail sheet with four predictions, 24h ECharts fingerprint with event bands, plain-language and SHAP explanations, on deterministic mock data.
+**Goal:** Ship the single-screen Energy Fingerprints demo: Aargau PLZ area map, ID-based building list, detail sheet with four predictions, 24h ECharts fingerprint with event bands, plain-language and SHAP explanations, on deterministic mock data.
 
 **Architecture:** One route. A client `AppShell` lays out header, map, list, and sheet; every interactive piece reads a Zustand UI store and TanStack Query hooks directly, so the five UI areas are independent. Pure domain logic (labels, search, chart option, PLZ lookup, mock generator) lives in `src/lib` and is unit-tested. Wave 0 freezes the contract; Wave 1 builds the five UI areas in parallel worktrees; Wave 2 integrates, runs the e2e demo flow, reviews, and cleans up.
 
@@ -23,6 +23,7 @@
 - Mock data: seed 42, 120 buildings, day `2026-09-09T00:00:00+02:00`, 96 points at 15 min, demo building `AG-004711` in `5000` Aarau with PV 92 / Battery 48 / Heat pump 31 / EV 76.
 - Chart x axis: minutes since series start, 0..1440, ticks every 240, labels `00 04 08 12 16 20 24`.
 - Wave 1 file ownership (spec §4) is binding: never create or edit a file outside your task's `Files` list. Shared files (`package.json`, `globals.css`, `page.tsx`, `ui-store.ts`, `types.ts`) are Wave 0 / Wave 2 only.
+- After each task's final commit, push: `git push -u origin HEAD`.
 - Definition of done for every task: `npm run check` green (lint + typecheck + unit tests); no `console.log`; no `any`; no `// TODO`; no unused exports; commits in `type: summary` style ending with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
 - Before using any shadcn component, read its generated file in `src/components/ui/` — the base-nova style wraps `@base-ui/react`, and prop names differ from older shadcn (e.g. `Select` takes `items`, `onOpenChange(open, details)`).
 
@@ -1518,7 +1519,7 @@ export function useSelectedBuilding(): Building | undefined {
   return useMemo(() => (id ? data?.find((b) => b.id === id) : undefined), [data, id]);
 }
 
-/** Counts over the whole dataset, independent of filters; drives the choropleth. */
+/** Counts over the whole dataset, independent of filters; feeds the map tooltip. */
 export function usePlzCounts(): Record<string, number> {
   const { data } = useBuildings();
   return useMemo(() => countBuildingsByPlz(data ?? EMPTY), [data]);
@@ -1902,42 +1903,32 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 6: Map — Aargau PLZ choropleth with hover, click-to-select, highlight and fit
+### Task 6: Map — Aargau PLZ areas with hover, click-to-select, highlight and fit
 
 **Files:**
-- Create: `src/components/map/plz-layers.tsx`, `src/components/map/map-tooltip.tsx`, `src/components/map/map-legend.tsx`, `src/components/map/map-view.tsx`, `src/app/dev/map/page.tsx`
+- Create: `src/components/map/plz-layers.tsx`, `src/components/map/map-tooltip.tsx`, `src/components/map/map-view.tsx`, `src/app/dev/map/page.tsx`
 - Test: `src/components/map/plz-layers.test.ts`, `src/components/map/map-view.test.tsx`
 
 **Interfaces:**
 - Consumes: `usePlzCounts`, `useHighlightedPlz` (Task 4); `AARGAU_BBOX`, `buildPlzGeoJson`, `getPlzArea`, `formatPlz`, `PlzCountProperties` (Task 2); `useUIStore` (`selectedPlz`, `selectPlz`).
 - Produces: `<MapView />` (prop-less, client-only — Task 10 loads it with `next/dynamic` and `ssr: false`); `MAP_STYLE_URL`.
 
-- [ ] **Step 1: Write the failing expression test `src/components/map/plz-layers.test.ts`**
+- [ ] **Step 1: Write the failing filter test `src/components/map/plz-layers.test.ts`**
 
 ```ts
 import { describe, expect, it } from "vitest";
 
-import { CHOROPLETH_COLORS, fillColorExpression } from "@/components/map/plz-layers";
+import { plzFilter } from "@/components/map/plz-layers";
 
-describe("fillColorExpression", () => {
-  it("keeps zero-count areas grey and ramps 1..max", () => {
-    const expr = fillColorExpression(8);
-    expect(expr[0]).toBe("case");
-    expect(expr[2]).toBe(CHOROPLETH_COLORS.zero);
-    expect(expr[3]).toEqual([
-      "interpolate",
-      ["linear"],
-      ["get", "count"],
-      1,
-      CHOROPLETH_COLORS.low,
-      8,
-      CHOROPLETH_COLORS.high,
-    ]);
+describe("plzFilter", () => {
+  it("matches exactly one PLZ", () => {
+    expect(plzFilter("5000")).toEqual(["==", ["get", "plz"], "5000"]);
   });
 
-  it("avoids a degenerate ramp when max is 0 or 1", () => {
-    expect(fillColorExpression(0)[3]).toBe(CHOROPLETH_COLORS.high);
-    expect(fillColorExpression(1)[3]).toBe(CHOROPLETH_COLORS.high);
+  it("matches nothing for null", () => {
+    const [, , sentinel] = plzFilter(null);
+    expect(typeof sentinel).toBe("string");
+    expect(sentinel).not.toMatch(/^\d{4}$/);
   });
 });
 ```
@@ -1956,53 +1947,43 @@ import type { PlzCountProperties } from "@/lib/plz";
 export const PLZ_SOURCE_ID = "plz";
 export const PLZ_FILL_LAYER_ID = "plz-fill";
 
-/** Spec §10: zero grey, then light → dark blue. */
-export const CHOROPLETH_COLORS = { zero: "#f1f5f9", low: "#dbeafe", high: "#1d4ed8" } as const;
-const BORDER_COLOR = "#94a3b8";
-const HIGHLIGHT_COLOR = "#1d4ed8";
+/** Spec §10: one quiet fill, thin borders, tint on hover, strong outline for the highlighted area. */
+export const MAP_COLORS = {
+  fill: "#dbeafe",
+  border: "#94a3b8",
+  highlight: "#1d4ed8",
+} as const;
+const FILL_OPACITY = 0.35;
+const HOVER_OPACITY = 0.12;
 /** A value no PLZ has, so a null filter matches nothing. */
 const NO_MATCH = "__none__";
 
-/** Zero-count areas are neutral grey; counts 1..max ramp light → dark blue. */
-export function fillColorExpression(maxCount: number): ExpressionSpecification {
-  const ramp: ExpressionSpecification | string =
-    maxCount > 1
-      ? ["interpolate", ["linear"], ["get", "count"], 1, CHOROPLETH_COLORS.low, maxCount, CHOROPLETH_COLORS.high]
-      : CHOROPLETH_COLORS.high;
-  return ["case", ["==", ["get", "count"], 0], CHOROPLETH_COLORS.zero, ramp];
-}
-
-function plzFilter(plz: string | null): ExpressionSpecification {
+export function plzFilter(plz: string | null): ExpressionSpecification {
   return ["==", ["get", "plz"], plz ?? NO_MATCH];
 }
 
 type PlzLayersProps = {
   data: FeatureCollection<Polygon, PlzCountProperties>;
-  maxCount: number;
   highlightedPlz: string | null;
   hoveredPlz: string | null;
 };
 
-export function PlzLayers({ data, maxCount, highlightedPlz, hoveredPlz }: PlzLayersProps) {
+export function PlzLayers({ data, highlightedPlz, hoveredPlz }: PlzLayersProps) {
   return (
     <Source id={PLZ_SOURCE_ID} type="geojson" data={data}>
-      <Layer
-        id={PLZ_FILL_LAYER_ID}
-        type="fill"
-        paint={{ "fill-color": fillColorExpression(maxCount), "fill-opacity": 0.75 }}
-      />
+      <Layer id={PLZ_FILL_LAYER_ID} type="fill" paint={{ "fill-color": MAP_COLORS.fill, "fill-opacity": FILL_OPACITY }} />
       <Layer
         id="plz-hover"
         type="fill"
         filter={plzFilter(hoveredPlz)}
-        paint={{ "fill-color": HIGHLIGHT_COLOR, "fill-opacity": 0.12 }}
+        paint={{ "fill-color": MAP_COLORS.highlight, "fill-opacity": HOVER_OPACITY }}
       />
-      <Layer id="plz-line" type="line" paint={{ "line-color": BORDER_COLOR, "line-width": 0.6 }} />
+      <Layer id="plz-line" type="line" paint={{ "line-color": MAP_COLORS.border, "line-width": 0.6 }} />
       <Layer
         id="plz-highlight"
         type="line"
         filter={plzFilter(highlightedPlz)}
-        paint={{ "line-color": HIGHLIGHT_COLOR, "line-width": 2.5 }}
+        paint={{ "line-color": MAP_COLORS.highlight, "line-width": 2.5 }}
       />
     </Source>
   );
@@ -2011,10 +1992,9 @@ export function PlzLayers({ data, maxCount, highlightedPlz, hoveredPlz }: PlzLay
 
 Run: `npx vitest run src/components/map/plz-layers.test.ts` → PASS.
 
-- [ ] **Step 3: Create `src/components/map/map-tooltip.tsx` and `src/components/map/map-legend.tsx`**
+- [ ] **Step 3: Create `src/components/map/map-tooltip.tsx`**
 
 ```tsx
-// src/components/map/map-tooltip.tsx
 import { formatPlz } from "@/lib/plz";
 
 type MapTooltipProps = { plz: string | null; count: number; x: number; y: number };
@@ -2029,30 +2009,6 @@ export function MapTooltip({ plz, count, x, y }: MapTooltipProps) {
       style={{ left: x + 12, top: y + 12 }}
     >
       {formatPlz(plz)} · {count} {count === 1 ? "building" : "buildings"}
-    </div>
-  );
-}
-```
-
-```tsx
-// src/components/map/map-legend.tsx
-import { CHOROPLETH_COLORS } from "@/components/map/plz-layers";
-
-export function MapLegend({ maxCount }: { maxCount: number }) {
-  return (
-    <div className="absolute bottom-3 left-3 z-10 rounded-lg border bg-background/95 px-3 py-2 text-xs shadow-sm">
-      <div className="mb-1 font-medium">Buildings per area</div>
-      <div className="flex items-center gap-2">
-        <span>0</span>
-        <div
-          aria-hidden
-          className="h-2 w-24 rounded-sm"
-          style={{
-            background: `linear-gradient(to right, ${CHOROPLETH_COLORS.zero}, ${CHOROPLETH_COLORS.low}, ${CHOROPLETH_COLORS.high})`,
-          }}
-        />
-        <span>{maxCount}</span>
-      </div>
     </div>
   );
 }
@@ -2102,6 +2058,7 @@ vi.mock("@/lib/api", () => ({
 import { MapView } from "@/components/map/map-view";
 
 type Handler = (event: unknown) => void;
+const feature = (plz: string, count: number) => ({ properties: { plz, name: "x", gemeinde: "x", count } });
 const clickWith = (features: unknown[]) =>
   act(() => (mapMock.props.onClick as Handler)({ features, point: { x: 10, y: 10 } }));
 
@@ -2111,35 +2068,28 @@ describe("MapView", () => {
     mapMock.fitBounds.mockClear();
   });
 
-  it("renders the map, legend and no tooltip initially", async () => {
+  it("renders the map and no tooltip initially", () => {
     renderWithProviders(<MapView />);
     expect(screen.getByTestId("mock-map")).toBeInTheDocument();
-    expect(screen.getByText("Buildings per area")).toBeInTheDocument();
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("2")).toBeInTheDocument());
   });
 
   it("selects a PLZ on click, toggles it off on a second click, clears on empty click", async () => {
     renderWithProviders(<MapView />);
     await waitFor(() => expect(mapMock.props.onClick).toBeTypeOf("function"));
-    await clickWith([{ properties: { plz: "5000", name: "Aarau", gemeinde: "Aarau", count: 2 } }]);
+    await clickWith([feature("5000", 2)]);
     expect(useUIStore.getState().selectedPlz).toBe("5000");
-    await clickWith([{ properties: { plz: "5000", name: "Aarau", gemeinde: "Aarau", count: 2 } }]);
+    await clickWith([feature("5000", 2)]);
     expect(useUIStore.getState().selectedPlz).toBeNull();
     useUIStore.getState().selectPlz("5400");
     await clickWith([]);
     expect(useUIStore.getState().selectedPlz).toBeNull();
   });
 
-  it("shows a tooltip while hovering a PLZ", async () => {
+  it("shows a tooltip with the building count while hovering a PLZ", async () => {
     renderWithProviders(<MapView />);
     await waitFor(() => expect(mapMock.props.onMouseMove).toBeTypeOf("function"));
-    await act(() =>
-      (mapMock.props.onMouseMove as Handler)({
-        features: [{ properties: { plz: "5000", name: "Aarau", gemeinde: "Aarau", count: 2 } }],
-        point: { x: 40, y: 50 },
-      }),
-    );
+    await act(() => (mapMock.props.onMouseMove as Handler)({ features: [feature("5000", 2)], point: { x: 40, y: 50 } }));
     expect(screen.getByRole("tooltip")).toHaveTextContent("5000 Aarau · 2 buildings");
     await act(() => (mapMock.props.onMouseLeave as () => void)());
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
@@ -2171,7 +2121,6 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, { NavigationControl, type MapLayerMouseEvent, type MapRef } from "react-map-gl/maplibre";
 
-import { MapLegend } from "@/components/map/map-legend";
 import { MapTooltip } from "@/components/map/map-tooltip";
 import { PLZ_FILL_LAYER_ID, PlzLayers } from "@/components/map/plz-layers";
 import { useHighlightedPlz, usePlzCounts } from "@/hooks/use-buildings";
@@ -2200,7 +2149,6 @@ export function MapView() {
   const [hover, setHover] = useState<Hover>(null);
 
   const data = useMemo(() => buildPlzGeoJson(counts), [counts]);
-  const maxCount = useMemo(() => Math.max(0, ...Object.values(counts)), [counts]);
 
   useEffect(() => {
     if (!highlightedPlz) return;
@@ -2227,9 +2175,7 @@ export function MapView() {
 
   const handleMouseMove = useCallback((event: MapLayerMouseEvent) => {
     const feature = plzFeatureAt(event);
-    setHover(
-      feature ? { plz: feature.plz, count: feature.count, x: event.point.x, y: event.point.y } : null,
-    );
+    setHover(feature ? { plz: feature.plz, count: feature.count, x: event.point.x, y: event.point.y } : null);
   }, []);
 
   const clearHover = useCallback(() => setHover(null), []);
@@ -2248,15 +2194,9 @@ export function MapView() {
         style={{ width: "100%", height: "100%" }}
       >
         <NavigationControl position="bottom-right" showCompass={false} />
-        <PlzLayers
-          data={data}
-          maxCount={maxCount}
-          highlightedPlz={highlightedPlz}
-          hoveredPlz={hover?.plz ?? null}
-        />
+        <PlzLayers data={data} highlightedPlz={highlightedPlz} hoveredPlz={hover?.plz ?? null} />
       </Map>
       <MapTooltip plz={hover?.plz ?? null} count={hover?.count ?? 0} x={hover?.x ?? 0} y={hover?.y ?? 0} />
-      <MapLegend maxCount={maxCount} />
     </div>
   );
 }
@@ -2297,7 +2237,7 @@ export default function MapPreviewPage() {
 }
 ```
 
-Run `npm run dev`, open `http://localhost:3000/dev/map`. Confirm: Aargau fills the view; areas with buildings are blue, others grey; hovering shows the tooltip and a light fill; clicking outlines the area and updates the readout; clicking the same area again clears it; "Select demo building" zooms to 5000 Aarau with a thick outline. Screenshot for the report.
+Run `npm run dev`, open `http://localhost:3000/dev/map`. Confirm: Aargau fills the view with quiet light-blue areas and thin borders; hovering shows the tooltip and a light tint; clicking outlines the area and updates the readout; clicking the same area again clears it; "Select demo building" zooms to 5000 Aarau with a thick outline. Screenshot for the report.
 
 - [ ] **Step 9: Full check and commit**
 
@@ -2305,7 +2245,7 @@ Run: `npm run check` — expected green.
 
 ```bash
 git add src/components/map src/app/dev/map
-git commit -m "feat(frontend): add Aargau PLZ choropleth map with hover, select and fit
+git commit -m "feat(frontend): add Aargau PLZ area map with hover, select and fit
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
@@ -3784,7 +3724,7 @@ src/
   components/
     app-shell.tsx      # header + map + list + detail layout, view mode
     header/            # wordmark, area select, search, view toggle, about dialog
-    map/               # MapLibre PLZ choropleth, tooltip, legend
+    map/               # MapLibre PLZ areas, tooltip
     buildings/         # list panel, area header, building cards, chips
     detail/            # detail sheet, prediction cards, why popover, SHAP details
     chart/             # ECharts 24h fingerprint + legend
@@ -3815,8 +3755,8 @@ At the top of `frontend/docs/energy-fingerprints-task.md`, after the blockquote,
 
 ```markdown
 > **Adaptation (2026-09-10):** the data has no addresses or coordinates — only anonymised
-> building IDs with a postal code and town. The map therefore shows PLZ areas (choropleth by
-> building count) instead of building markers, and buildings are listed by ID. Binding
+> building IDs with a postal code and town. The map therefore shows outlined PLZ areas
+> instead of building markers, and buildings are listed by ID. Binding
 > decisions live in `docs/superpowers/specs/2026-09-10-energy-fingerprints-frontend-design.md`.
 ```
 
@@ -3874,7 +3814,7 @@ Use superpowers:finishing-a-development-branch. Expected outcome: a PR from `fea
 
 ## Self-review (done while writing)
 
-**Spec coverage.** §5 contract → Task 2. §6.1–6.3 → Tasks 2, 3. §6.4 → Task 9. §6.5 → Task 4. §7 → Task 3. §8 → Task 4. §9 header → 5, map → 6, list → 7, detail → 8, chart → 9, shell → 10. §10 tokens → Task 3; choropleth colours → Task 6. §11 demo flow → Task 11 (steps 2 via search; map click via Task 6 unit test). §12/§13 are documentation → Task 11. §14 hygiene → runbook + Task 12. Task doc §16 "Required" items all map to Tasks 5–10.
+**Spec coverage.** §5 contract → Task 2. §6.1–6.3 → Tasks 2, 3. §6.4 → Task 9. §6.5 → Task 4. §7 → Task 3. §8 → Task 4. §9 header → 5, map → 6, list → 7, detail → 8, chart → 9, shell → 10. §10 tokens → Task 3; map colours → Task 6. §11 demo flow → Task 11 (steps 2 via search; map click via Task 6 unit test). §12/§13 are documentation → Task 11. §14 hygiene → runbook + Task 12. Task doc §16 "Required" items all map to Tasks 5–10.
 
 **Type consistency.** `selectBuilding(id)` (Task 3) used by Tasks 6, 7, 8 dev pages and list; `selectPlz(plz | null)` used by Tasks 6, 7; `useFilteredBuildings()` returns `{ buildings, total, isLoading, isError }` (Task 4) consumed in Task 7; `usePlzCounts`, `useHighlightedPlz` (Task 4) consumed in Task 6; `PlzCountProperties` (Task 2) consumed in Task 6; `ElectricityChart` props identical in Tasks 4, 8, 9; `describePrediction` output format "EV — 76% possible" asserted in Tasks 2 and 7; label variants `Likely | Possible | Unlikely` in Tasks 2, 8, 11.
 
