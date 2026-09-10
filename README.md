@@ -56,7 +56,31 @@ Weather data can provide additional context for heating demand and solar-related
 
 ## Getting Started
 
-This repository currently contains project documentation only. The implementation stack, setup steps, and run instructions will be documented when code is added.
+### Preview data in Renku
+
+From the repository directory in the Renku session, run:
+
+```sh
+python3 scripts/preview_data.py
+```
+
+The script looks for the nearby `aew-data` or `aew_data` mount, including under
+`data/`, and recursively prints each CSV's filename, header, and first ten data
+records. It supports `.csv` and `.csv.gz`, uses only the Python standard library,
+and reads a small prefix rather than loading whole files. It does not change any
+files or require the SAS URL in code. Excel and other non-CSV files are skipped.
+
+If the mount is elsewhere, pass its actual path (or the path to one CSV):
+
+```sh
+python3 scripts/preview_data.py /actual/path/to/aew-data
+```
+
+Keep data previews in the Renku console; do not commit real customer records or
+credentials. Save future processing outputs in the organizer-provided `store`
+mount, not the read-only input mount.
+
+Run the synthetic-data tests locally with `python3 -m unittest discover -s tests`.
 
 ## Contributing
 
