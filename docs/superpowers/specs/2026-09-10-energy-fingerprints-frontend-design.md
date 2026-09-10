@@ -21,9 +21,9 @@ Each decision names the option chosen and why. These are binding for implementer
 | # | Topic | Decision | Why |
 | --- | --- | --- | --- |
 | D1 | Basemap | MapLibre with the OpenFreeMap "positron" style, `https://tiles.openfreemap.org/styles/positron`, overridable via `NEXT_PUBLIC_MAP_STYLE_URL`. | Free, no API key, quiet light style (§17). Reachable at time of writing. Needs internet during the demo. |
-| D2 | Geography | Buildings are **not** placed on the map. The map shows Aargau's PLZ areas as a choropleth coloured by the number of buildings in the dataset per PLZ. Flat map (pitch 0). | Data has only PLZ + ID. A PLZ choropleth is honest, still looks like an energy map, and gives the map a real job: choosing an area. |
+| D2 | Geography | Buildings are **not** placed on the map. The map shows Aargau's PLZ areas as flat outlined polygons (pitch 0); only hover and selection change their look. | Data has only PLZ + ID. Outlined PLZ areas are honest about the data and give the map a real job: choosing an area. |
 | D3 | PLZ boundaries | Real polygons from swisstopo's open "Amtliches Ortschaftenverzeichnis" (PLZ layer), clipped to canton AG, dissolved to one polygon per PLZ, simplified, WGS84, committed as `frontend/src/data/aargau-plz.json` (239 features, ~234 KB). Rebuilt by `frontend/scripts/build-plz-geojson.sh`. **Already done and verified** (5000 → Aarau). | User decision. One committed file, no runtime download. |
-| D4 | Map colouring | Building count only. Zero-count areas light grey; counts on a linear light-to-dark blue ramp. One small legend. | User decision for MVP. |
+| D4 | Map colouring | No data colouring. Every PLZ area shares one light fill with thin borders; hovering tints the area; the highlighted area (selected area or the selected building's area) gets a strong outline. The hover tooltip still shows the building count. | User decision: keep the map quiet; choosing an area is the map's only job. |
 | D5 | Area ↔ list ↔ building sync | Clicking a PLZ selects that area: the map highlights it and the list filters to it. Clicking a building card opens the detail sheet, highlights the building's PLZ on the map, and fits the map to that area; it does **not** change the area filter. Selecting an area clears any selected building. Clicking the map outside any PLZ clears the area filter. | Keeps the list stable while browsing buildings, keeps the map in sync with what is inspected. |
 | D6 | Detail view | shadcn `Sheet` from the right, 640 px on desktop, full width on mobile, overlaying map and list. Title is the building ID; subtitle is "PLZ Town, AG". | One route, map stays visible behind the sheet. |
 | D7 | Chart axis model | X axis is a numeric `value` axis in **minutes since the series start** (0..1440), ticks every 240 min labelled `00 04 08 12 16 20 24`. Series data is `[minute, kW]`. Events are converted to minute bands, clipped to `[0, 1440]`, and split when they cross midnight. | Deterministic, timezone-proof, unit-testable without ECharts. Meets §10's `00:00 → 24:00` axis. |
@@ -49,7 +49,7 @@ Single route `/`. `page.tsx` stays a Server Component and renders one Client Com
 page.tsx (server)
 └── AppShell (client)
     ├── AppHeader ── AboutDialog
-    ├── MapView (dynamic, ssr:false) ── PlzLayers, MapTooltip, MapLegend
+    ├── MapView (dynamic, ssr:false) ── PlzLayers, MapTooltip
     ├── BuildingList ── AreaHeader, BuildingCard ×N ── ProbabilityChip ×4
     └── BuildingDetailSheet
         ├── PredictionCards ── PredictionCard ×4 ── WhyPopover
@@ -63,7 +63,7 @@ Data flow:
 ```
 aargau-plz.json ──► PLZ_AREAS / PLZ_BY_CODE (lib/plz.ts)
 fetchBuildings() ──► useBuildings() ──► useFilteredBuildings(selectedPlz, searchQuery) ──► BuildingList
-                                   ├──► usePlzCounts() ──► MapView choropleth
+                                   ├──► usePlzCounts() ──► MapView tooltip counts
                                    └──► useSelectedBuilding() ──► BuildingDetailSheet
 useHighlightedPlz() = selectedBuilding?.postcode ?? selectedPlz ──► MapView highlight + fitBounds
 ```
@@ -80,7 +80,7 @@ Ownership is binding in Wave 1: an agent may only create or edit files in its ow
 | `frontend/src/lib/types.ts` | Data contract | W0 |
 | `frontend/src/lib/predictions.ts` | Thresholds, labels, asset metadata, marker-asset picker, copy helper | W0 |
 | `frontend/src/lib/events.ts` | Event type metadata | W0 |
-| `frontend/src/lib/plz.ts` | Typed PLZ areas, lookup, bbox, counts, choropleth GeoJSON | W0 |
+| `frontend/src/lib/plz.ts` | Typed PLZ areas, lookup, bbox, counts, GeoJSON with counts | W0 |
 | `frontend/src/lib/random.ts` | Seeded PRNG | W0 |
 | `frontend/src/lib/mock-data.ts` | Deterministic mock buildings, demo building | W0 |
 | `frontend/src/lib/api.ts` | `fetchBuildings()` swap point | W0 |
@@ -91,7 +91,7 @@ Ownership is binding in Wave 1: an agent may only create or edit files in its ow
 | `frontend/src/test/fixtures.ts` | `makeBuilding()` factory | W0 |
 | `frontend/src/components/chart/electricity-chart.tsx` | Chart component (stub in W0, real in W1-chart) | W0 → W1-chart |
 | `frontend/src/components/header/*` | Header, wordmark, area select, search, view toggle, about dialog | W1-header |
-| `frontend/src/components/map/*` | Map, PLZ layers, tooltip, legend, map constants | W1-map |
+| `frontend/src/components/map/*` | Map, PLZ layers, tooltip, map constants | W1-map |
 | `frontend/src/components/buildings/*` | List panel, area header, card, chip | W1-list |
 | `frontend/src/components/detail/*` | Sheet, prediction cards, why popover, explanation, technical details | W1-detail |
 | `frontend/src/lib/chart-option.ts`, `src/components/chart/*` | ECharts option builder, chart, legend | W1-chart |
@@ -269,10 +269,9 @@ All Client Components. Only the sheet's children and the chart take data props; 
 | --- | --- | --- | --- |
 | `AppHeader` | `components/header/app-header.tsx` | none | Wordmark, area `Select` (single option "Aargau (AG)"), search `Input` bound to `searchQuery` with placeholder "Search building ID, PLZ or town...", Map/List toggle (two buttons with `aria-pressed`), "About this project" button. |
 | `AboutDialog` | `components/header/about-dialog.tsx` | none | shadcn `Dialog` bound to `isAboutOpen`; copy from the root README challenge section. |
-| `MapView` | `components/map/map-view.tsx` | none | `react-map-gl/maplibre` `Map`, initial view fits `AARGAU_BBOX`, `NavigationControl`. Renders `PlzLayers` from `buildPlzGeoJson(usePlzCounts())`. `interactiveLayerIds=["plz-fill"]`; on click with a feature → `selectPlz(plz)` (or `null` when the same PLZ is clicked again); click with no feature → `selectPlz(null)`; on mouse move → local `hoveredPlz` + cursor position for `MapTooltip`. When `useHighlightedPlz()` changes to a PLZ, `fitBounds(bbox, { padding: 48, duration: 900, maxZoom: 13 })`. Imports `maplibre-gl/dist/maplibre-gl.css`. |
-| `PlzLayers` | `components/map/plz-layers.tsx` | `data`, `maxCount`, `highlightedPlz`, `hoveredPlz` | `Source id="plz"` + three `Layer`s: `plz-fill` (choropleth by `count`), `plz-line` (thin borders), `plz-highlight` (thicker primary-colour outline filtered to the highlighted PLZ) and a hover fill filtered to `hoveredPlz`. |
+| `MapView` | `components/map/map-view.tsx` | none | `react-map-gl/maplibre` `Map`, initial view fits `AARGAU_BBOX`, `NavigationControl`. Renders `PlzLayers` from `buildPlzGeoJson(usePlzCounts())` (counts feed the tooltip only). `interactiveLayerIds=["plz-fill"]`; on click with a feature → `selectPlz(plz)` (or `null` when the same PLZ is clicked again); click with no feature → `selectPlz(null)`; on mouse move → local `hoveredPlz` + cursor position for `MapTooltip`. When `useHighlightedPlz()` changes to a PLZ, `fitBounds(bbox, { padding: 48, duration: 900, maxZoom: 13 })`. Imports `maplibre-gl/dist/maplibre-gl.css`. |
+| `PlzLayers` | `components/map/plz-layers.tsx` | `data`, `highlightedPlz`, `hoveredPlz` | `Source id="plz"` + four `Layer`s: `plz-fill` (uniform light fill), `plz-hover` (tint filtered to `hoveredPlz`), `plz-line` (thin borders), `plz-highlight` (thick primary-colour outline filtered to the highlighted PLZ). |
 | `MapTooltip` | `components/map/map-tooltip.tsx` | `plz`, `count`, `x`, `y` | Absolutely positioned label "5000 Aarau · 12 buildings" near the cursor; hidden when `plz` is null. |
-| `MapLegend` | `components/map/map-legend.tsx` | `maxCount` | Bottom-left card "Buildings per area" with the colour ramp and `0 … max`. |
 | `BuildingList` | `components/buildings/building-list.tsx` | none | `AreaHeader`, `ScrollArea` of `BuildingCard`s from `useFilteredBuildings`, empty and loading states, scrolls the selected card into view. |
 | `AreaHeader` | `components/buildings/area-header.tsx` | none | "Buildings in 5000 Aarau" + "12 buildings" + "Show all areas" button when `selectedPlz` is set; otherwise "Buildings in Aargau" + "120 buildings". |
 | `BuildingCard` | `components/buildings/building-card.tsx` | `building`, `selected`, `onSelect(id)` | Button-like card with `id="building-card-<id>"`, `aria-pressed`, `Building2` icon, ID bold, "PLZ Town" below, four `ProbabilityChip`s. |
@@ -296,7 +295,7 @@ Tokens in `globals.css` (light only; the existing `.dark` block stays untouched)
 - muted `oklch(0.96 0.01 250)`, muted-foreground `oklch(0.52 0.03 258)`, border `oklch(0.91 0.01 250)`, ring `oklch(0.60 0.15 252)`
 - chart-1..4 = PV, Battery, Heat pump, EV colours
 
-Choropleth ramp (hex, used in MapLibre expressions): zero `#f1f5f9`; 1 → `#dbeafe`; max → `#1d4ed8`. Highlight outline `#1d4ed8` 2.5 px; hover fill `#1d4ed8` at 0.12 opacity; borders `#94a3b8` 0.6 px.
+Map layer colours (hex, used in MapLibre paint): area fill `#dbeafe` at 0.35 opacity; hover fill `#1d4ed8` at 0.12; highlight outline `#1d4ed8` 2.5 px; borders `#94a3b8` 0.6 px.
 
 Rules: white cards with `ring-1` borders, `rounded-xl`, lucide line icons, generous whitespace. Map and chart are the only strong visuals. No gradients, no animation beyond map fit and sheet slide.
 
@@ -314,7 +313,7 @@ The Playwright test drives steps 1, 2 (via search), 3–7 and asserts the four l
 
 ## 12. Deviations from the task doc
 
-- **No building markers, no addresses, no 3D** (§3, §5, §6, §7 wherever they mention addresses or pins). Replaced by the PLZ choropleth and ID-based cards (D2–D5).
+- **No building markers, no addresses, no 3D** (§3, §5, §6, §7 wherever they mention addresses or pins). Replaced by outlined PLZ areas and ID-based cards (D2–D5).
 - §15 contract loses `address` and `location`, gains `explanation`.
 - §18 mobile stacking replaced by the Map/List toggle (D12).
 - §4 logo is a wordmark (D16).
