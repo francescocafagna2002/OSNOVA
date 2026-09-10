@@ -24,8 +24,8 @@ npx -y mapshaper@0.7.61 "$TMP/shp/AMTOVZ_SHP_LV95/AMTOVZ_ZIP.shp" \
   -join "$TMP/lookup.csv" keys=ZIP_ID,ZIP_ID string-fields=ZIP_ID,plz fields=plz,name,gemeinde \
   -filter 'plz != null' \
   -dissolve plz copy-fields=name,gemeinde \
+  -simplify dp interval=10 keep-shapes \
   -proj wgs84 \
-  -simplify 8% keep-shapes \
-  -o precision=0.0001 format=geojson id-field=plz "$OUT"
+  -o precision=0.00001 format=geojson id-field=plz "$OUT"
 
 echo "wrote $OUT"
