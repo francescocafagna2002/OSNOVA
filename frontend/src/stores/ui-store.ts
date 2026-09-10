@@ -23,7 +23,6 @@ interface UIActions {
   selectBuilding: (id: string) => void;
   /** Closes the detail but keeps the building highlighted. */
   closeDetail: () => void;
-  clearSelection: () => void;
   setViewMode: (mode: ViewMode) => void;
   setSearchQuery: (query: string) => void;
   setAboutOpen: (open: boolean) => void;
@@ -45,7 +44,6 @@ export const useUIStore = create<UIState>((set) => ({
   selectPlz: (plz) => set({ selectedPlz: plz, selectedBuildingId: null, isDetailOpen: false }),
   selectBuilding: (id) => set({ selectedBuildingId: id, isDetailOpen: true }),
   closeDetail: () => set({ isDetailOpen: false }),
-  clearSelection: () => set({ selectedBuildingId: null, isDetailOpen: false }),
   setViewMode: (mode) => set({ viewMode: mode }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setAboutOpen: (open) => set({ isAboutOpen: open }),

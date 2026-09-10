@@ -14,7 +14,7 @@ import {
 const MOCK_SEED = 42;
 export const MOCK_BUILDING_COUNT = 120;
 /** Local midnight in Europe/Zurich (CEST). Timestamps are emitted with this offset. */
-export const MOCK_DAY_START = "2026-09-09T00:00:00+02:00";
+const MOCK_DAY_START = "2026-09-09T00:00:00+02:00";
 export const DEMO_BUILDING_ID = "AG-004711";
 
 const TZ_OFFSET_MINUTES = 120;

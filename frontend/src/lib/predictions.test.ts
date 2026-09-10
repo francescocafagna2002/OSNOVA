@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   ASSETS,
   describePrediction,
+  formatContribution,
   formatProbability,
-  getMarkerAssets,
   getPredictionLabel,
 } from "@/lib/predictions";
 
@@ -40,20 +40,18 @@ describe("ASSETS", () => {
   });
 });
 
-describe("getMarkerAssets", () => {
-  it("returns only Likely assets, highest first, capped at two", () => {
-    expect(getMarkerAssets({ pv: 92, battery: 85, heatPump: 31, ev: 96 })).toEqual(["ev", "pv"]);
-  });
-
-  it("returns an empty list when nothing is Likely", () => {
-    expect(getMarkerAssets({ pv: 79, battery: 10, heatPump: 50, ev: 0 })).toEqual([]);
-  });
-});
-
 describe("describePrediction", () => {
   it("phrases predictions as probabilities, never as facts", () => {
     const text = describePrediction("ev", 76);
     expect(text).toBe("EV — 76% possible");
     expect(text.toLowerCase()).not.toContain("has");
+  });
+});
+
+describe("formatContribution", () => {
+  it("prints a sign and two decimals", () => {
+    expect(formatContribution(0.31)).toBe("+0.31");
+    expect(formatContribution(-0.04)).toBe("−0.04");
+    expect(formatContribution(0)).toBe("+0.00");
   });
 });

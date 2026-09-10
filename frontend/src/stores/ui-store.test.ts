@@ -43,14 +43,6 @@ describe("ui-store", () => {
     expect(s.selectedBuildingId).toBe("AG-004711");
   });
 
-  it("clearSelection drops the building and closes the detail", () => {
-    useUIStore.getState().selectBuilding("AG-004711");
-    useUIStore.getState().clearSelection();
-    const s = useUIStore.getState();
-    expect(s.isDetailOpen).toBe(false);
-    expect(s.selectedBuildingId).toBeNull();
-  });
-
   it("setters update view mode, search and about", () => {
     useUIStore.getState().setViewMode("list");
     useUIStore.getState().setSearchQuery("aarau");

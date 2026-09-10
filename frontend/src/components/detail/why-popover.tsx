@@ -4,7 +4,7 @@ import { Check } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ASSET_BY_KEY, getPredictionLabel } from "@/lib/predictions";
+import { ASSET_BY_KEY, formatContribution, getPredictionLabel } from "@/lib/predictions";
 import type { AssetExplanation, AssetKey, ShapFeature } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -54,7 +54,7 @@ export function WhyPopover({ assetKey, probability, explanation }: WhyPopoverPro
                 <li key={bar.feature} className="text-xs">
                   <div className="flex justify-between gap-2">
                     <span>{bar.feature}</span>
-                    <span className="tabular-nums">+{bar.contribution.toFixed(2)}</span>
+                    <span className="tabular-nums">{formatContribution(bar.contribution)}</span>
                   </div>
                   <div className="mt-0.5 h-1.5 rounded-full bg-muted">
                     <div
