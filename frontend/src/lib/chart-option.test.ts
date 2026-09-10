@@ -7,9 +7,11 @@ import {
   formatClock,
   formatHourTick,
   hexToRgba,
+  LINE_COLOR,
   minutesFromStart,
   TICK_MINUTES,
 } from "@/lib/chart-option";
+import { CHART } from "@/lib/theme";
 import { makeBuilding } from "@/test/fixtures";
 
 const startMs = Date.parse("2026-09-09T00:00:00+02:00");
@@ -103,5 +105,53 @@ describe("buildChartOption", () => {
     const empty = buildChartOption([], []);
     const [series] = empty.series as Array<{ data: unknown[] }>;
     expect(series.data).toEqual([]);
+  });
+
+  it("styles the line per R12: navy, 2.5px", () => {
+    const [series] = option.series as Array<{ lineStyle: { width: number; color: string } }>;
+    expect(LINE_COLOR).toBe(CHART.line);
+    expect(series.lineStyle).toEqual({ width: 2.5, color: CHART.line });
+  });
+
+  it("styles axes with the secondary colour and 12px Inter labels", () => {
+    const xAxis = option.xAxis as {
+      axisLabel: { color: string; fontSize: number; fontFamily: string; formatter: unknown };
+    };
+    const yAxis = option.yAxis as {
+      name: string;
+      nameTextStyle: { color: string; fontSize: number; fontFamily: string };
+      axisLabel: { color: string; fontSize: number; fontFamily: string };
+    };
+    expect(xAxis.axisLabel.color).toBe(CHART.axis);
+    expect(xAxis.axisLabel.fontSize).toBe(12);
+    expect(xAxis.axisLabel.fontFamily).toBe("Inter, Arial, sans-serif");
+    expect(yAxis.name).toBe("kW");
+    expect(yAxis.nameTextStyle.color).toBe(CHART.axis);
+    expect(yAxis.axisLabel.color).toBe(CHART.axis);
+  });
+
+  it("keeps grid margins on the 8px scale", () => {
+    const grid = option.grid as { left: number; right: number; top: number; bottom: number };
+    for (const value of Object.values(grid)) {
+      expect(value % 8).toBe(0);
+    }
+  });
+
+  it("styles the tooltip white with a light border and dark text", () => {
+    const tooltip = option.tooltip as { backgroundColor: string; borderColor: string; textStyle: { color: string } };
+    expect(tooltip.backgroundColor).toBe("#fff");
+    expect(tooltip.borderColor).toBe("#D9E0E6");
+    expect(tooltip.textStyle.color).toBe("#182638");
+  });
+
+  it("fills each band type with its own opacity and label colour (R12)", () => {
+    const [series] = option.series as Array<{
+      markArea: { data: [{ itemStyle: { color: string }; label: { color: string } }, unknown][] };
+    }>;
+    const [evTail, , pv] = series.markArea.data;
+    expect(evTail[0].itemStyle.color).toBe(hexToRgba("#0065A8", 0.12)); // EV band colour
+    expect(evTail[0].label.color).toBe("#0065A8");
+    expect(pv[0].itemStyle.color).toBe(hexToRgba("#EFA33A", 0.14));
+    expect(pv[0].label.color).toBe("#B8791A");
   });
 });
