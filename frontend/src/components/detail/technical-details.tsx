@@ -12,7 +12,7 @@ type TechnicalDetailsProps = { explanation: BuildingExplanation; predictions: As
 export function TechnicalDetails({ explanation, predictions }: TechnicalDetailsProps) {
   return (
     <Collapsible>
-      <CollapsibleTrigger className="group flex items-center gap-1 text-sm font-medium text-primary hover:text-navy hover:underline">
+      <CollapsibleTrigger className="group flex items-center gap-1 text-sm font-medium text-primary hover:text-navy hover:underline focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:outline-none">
         Show technical details
         <ChevronDown className="size-4 transition-transform group-data-[panel-open]:rotate-180" aria-hidden />
       </CollapsibleTrigger>
