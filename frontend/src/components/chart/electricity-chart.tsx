@@ -27,7 +27,7 @@ export function ElectricityChart({ electricity, events, className }: Electricity
       data-testid="electricity-chart"
       data-points={electricity.length}
       data-events={events.length}
-      className={cn("space-y-2", className)}
+      className={cn("space-y-2 rounded-2xl border border-border bg-white p-4", className)}
     >
       <ReactECharts option={option} notMerge style={{ height: CHART_HEIGHT, width: "100%" }} opts={{ renderer: "svg" }} />
       <ChartLegend events={events} />
