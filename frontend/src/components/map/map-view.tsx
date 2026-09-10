@@ -2,6 +2,7 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 
+import { setWorkerUrl } from "maplibre-gl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, { NavigationControl, type MapLayerMouseEvent, type MapRef } from "react-map-gl/maplibre";
 
@@ -10,6 +11,10 @@ import { PLZ_FILL_LAYER_ID, PlzLayers } from "@/components/map/plz-layers";
 import { useHighlightedPlz, usePlzCounts } from "@/hooks/use-buildings";
 import { AARGAU_BBOX, buildPlzGeoJson, getPlzArea, type PlzCountProperties } from "@/lib/plz";
 import { useUIStore } from "@/stores/ui-store";
+
+// MapLibre resolves its worker with `new URL("./maplibre-gl-worker.mjs", import.meta.url)`,
+// which Turbopack rewrites to an empty URL; point it at the copy in `public/` instead.
+setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
 
 export const MAP_STYLE_URL =
   process.env.NEXT_PUBLIC_MAP_STYLE_URL ?? "https://tiles.openfreemap.org/styles/positron";
