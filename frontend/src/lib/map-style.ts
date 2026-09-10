@@ -57,7 +57,8 @@ function patchLine(id: string, paint: Record<string, unknown>): void {
     return;
   }
   if (BOUNDARY_ID.test(id)) {
-    paint["line-color"] = NEUTRAL.borderMedium;
+    // Administrative (municipal/cantonal) borders compete with the PLZ zones; the zones are the only borders we draw.
+    paint["line-opacity"] = 0;
     return;
   }
   const isRoad = ROAD_MAJOR_ID.test(id) || ROAD_MINOR_ID.test(id);
