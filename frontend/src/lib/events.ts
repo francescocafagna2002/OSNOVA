@@ -9,6 +9,3 @@ export const EVENT_META: Record<BuildingEventType, EventMeta> = {
   pv_generation: { label: "Possible PV generation", color: ASSET_BY_KEY.pv.color },
   high_consumption: { label: "High consumption", color: NEUTRAL.textSecondary },
 };
-
-/** Fill alpha for chart bands; keeps the consumption line the primary element. */
-export const EVENT_BAND_OPACITY = 0.14;
