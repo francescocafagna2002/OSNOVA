@@ -16,8 +16,8 @@ export function AreaHeader() {
   return (
     <div className="flex items-start justify-between gap-2 border-b px-4 py-3">
       <div>
-        <h2 className="text-sm font-semibold">{title}</h2>
-        <p className="text-xs text-muted-foreground">{isLoading ? "Loading…" : count}</p>
+        <h2 className="font-serif text-lg text-navy">{title}</h2>
+        <p className="text-[13px] text-muted-foreground">{isLoading ? "Loading…" : count}</p>
       </div>
       {selectedPlz && (
         <Button variant="outline" size="xs" onClick={() => selectPlz(null)}>

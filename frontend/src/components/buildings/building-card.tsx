@@ -17,17 +17,17 @@ export function BuildingCard({ building, selected, onSelect }: BuildingCardProps
       aria-pressed={selected}
       onClick={() => onSelect(building.id)}
       className={cn(
-        "w-full rounded-xl bg-card p-3 text-left ring-1 ring-foreground/10 transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        selected && "bg-primary/5 ring-2 ring-primary hover:bg-primary/5",
+        "w-full rounded-lg border border-border bg-card p-4 text-left shadow-[0_1px_3px_rgba(20,40,60,0.06)] transition-[border-color,background-color,box-shadow] duration-200 ease-out hover:border-[#AFC2D8] hover:bg-[#FBFDFF] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none",
+        selected && "border-primary bg-[#F7FBFE] shadow-[0_0_0_1px_#0065A8] hover:border-primary hover:bg-[#F7FBFE]",
       )}
     >
       <div className="flex items-start gap-2.5">
-        <div className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
-          <Building2 className="size-4" aria-hidden />
+        <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent text-navy">
+          <Building2 className="size-[18px]" aria-hidden />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold">Building {building.id}</div>
-          <div className="text-xs text-muted-foreground">
+          <div className="truncate font-serif text-[17px] font-semibold text-navy">Building {building.id}</div>
+          <div className="text-[13px] text-muted-foreground">
             {building.postcode} {building.city}
           </div>
         </div>

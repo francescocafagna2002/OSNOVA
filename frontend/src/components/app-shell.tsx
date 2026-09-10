@@ -36,8 +36,10 @@ export function AppShell() {
           data-testid="list-panel"
           data-mode={viewMode}
           className={cn(
-            "min-h-0 bg-background",
-            showMap ? "hidden border-l lg:flex lg:w-[35%] lg:max-w-md lg:flex-col" : "flex flex-1 flex-col",
+            "min-h-0 bg-surface-soft",
+            showMap
+              ? "hidden border-l lg:flex lg:w-[32%] lg:min-w-[340px] lg:max-w-[480px] lg:flex-col"
+              : "flex flex-1 flex-col",
           )}
         >
           <BuildingList />
