@@ -48,8 +48,9 @@ test.describe("Energy Fingerprints demo flow (spec §11)", () => {
     // 6. Technical details
     await sheet.getByRole("button", { name: /Show technical details/ }).click();
     await expect(sheet.getByText("EV prediction: 76%")).toBeVisible();
-    // base-ui's Collapsible keeps a hidden measurement copy of the panel in the
-    // DOM, so the SHAP value matches twice; .first() targets the visible one.
+    // The "Why EV?" popover closed in step 5 is still finishing its ~100ms
+    // close transition and still holds a "+0.31" SHAP node, so the text
+    // matches twice; .first() targets the technical-details one.
     await expect(sheet.getByText("+0.31").first()).toBeVisible();
 
     // 7. Close and return to the full list
