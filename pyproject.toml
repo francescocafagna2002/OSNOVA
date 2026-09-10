@@ -1,0 +1,9 @@
+[project]
+name = "data-processing-OSNOVA"
+version = "0.1.0"
+description = "Data processing project."
+requires-python = ">=3.10"
+dependencies = [
+    "polars>=1.0.0",
+    "pandas>=2.0.0"
+]
