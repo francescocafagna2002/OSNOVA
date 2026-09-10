@@ -16,26 +16,41 @@ asset probabilities, activity windows, and the evidence behind them.
 ## Getting started
 
 ```bash
-npm install      # first time only
-npm run dev      # http://localhost:3000
+npm install            # first time only
+npm run dev            # http://localhost:3000
+npm run check          # lint + typecheck + unit tests
+npm run test:e2e       # Playwright demo flow (needs `npx playwright install chromium` once)
 ```
-
-Other scripts: `npm run build`, `npm run start`, `npm run lint`.
 
 ## Project structure
 
 ```
 src/
-  app/                 # App Router (layout, pages)
+  app/                 # App Router: layout, single page
   components/
-    providers.tsx      # client providers (TanStack Query + devtools)
-    ui/                # shadcn/ui components
-  lib/
-    query-client.ts    # server/browser-safe QueryClient factory
-    utils.ts           # cn() helper
-  stores/
-    ui-store.ts        # Zustand global UI state
+    app-shell.tsx      # header + map + list + detail layout, view mode
+    header/            # wordmark, area select, search, view toggle, about dialog
+    map/                # MapLibre PLZ areas, tooltip
+    buildings/          # list panel, area header, building cards, chips
+    detail/              # detail sheet, prediction cards, why popover, SHAP details
+    chart/               # ECharts 24h fingerprint + legend
+    ui/                  # shadcn/ui (generated)
+  data/aargau-plz.json # PLZ polygons (swisstopo, built by scripts/build-plz-geojson.sh)
+  hooks/               # TanStack Query hooks and derived selectors
+  lib/                 # pure domain logic: types, predictions, search, chart option, mock data, PLZ
+  stores/ui-store.ts   # Zustand UI state
+  test/                # Vitest setup, render helper, fixtures
+e2e/                   # Playwright demo flow
+docs/                  # task doc
 ```
+
+## Data
+
+The UI runs on deterministic mock data (`src/lib/mock-data.ts`, seed 42) shaped like the
+future backend contract (`src/lib/types.ts`). `src/lib/api.ts` is the single swap point for a
+real endpoint. Buildings are anonymised IDs with a postal code; the map shows PLZ areas, not
+addresses. Basemap tiles come from OpenFreeMap (internet required); override with
+`NEXT_PUBLIC_MAP_STYLE_URL`.
 
 ## Conventions
 

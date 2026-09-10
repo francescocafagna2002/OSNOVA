@@ -3,6 +3,11 @@
 > Hackathon demo spec for the AEW **Energy Fingerprints** challenge frontend.
 > Adapted to this repo's stack — see [`frontend/README.md`](../README.md).
 
+> **Adaptation (2026-09-10):** the data has no addresses or coordinates — only anonymised
+> building IDs with a postal code and town. The map therefore shows outlined PLZ areas
+> instead of building markers, and buildings are listed by ID. Binding
+> decisions live in `docs/superpowers/specs/2026-09-10-energy-fingerprints-frontend-design.md`.
+
 ## 1. Goal
 
 Build a single-page web application for the AEW Energy Fingerprints hackathon.
@@ -397,18 +402,18 @@ e.g. `src/lib/mock-data.ts`, served through a TanStack Query hook (e.g.
 
 ### Required
 
-- [ ] Single web page/app shell (header, map, list).
-- [ ] Aargau map (MapLibre GL) with generic building markers.
-- [ ] Building list panel, synced with the map.
-- [ ] Map ↔ list selection sync (click either → highlight both).
-- [ ] Building detail modal/panel.
-- [ ] Four predictions (PV, Battery, Heat Pump, EV) with percentages and
+- [x] Single web page/app shell (header, map, list).
+- [x] Aargau PLZ map (MapLibre GL) with area selection.
+- [x] Building list panel (by ID), synced with the map.
+- [x] Map ↔ list selection sync (click either → highlight both).
+- [x] Building detail modal/panel.
+- [x] Four predictions (PV, Battery, Heat Pump, EV) with percentages and
       Likely/Possible/Unlikely labels.
-- [ ] Last-24h electricity graph (ECharts).
-- [ ] Highlighted event zones on the graph.
-- [ ] "About this prediction" static explanation.
-- [ ] Expandable technical details / SHAP section.
-- [ ] Mock data matching the contract in §15.
+- [x] Last-24h electricity graph (ECharts).
+- [x] Highlighted event zones on the graph.
+- [x] "About this prediction" static explanation.
+- [x] Expandable technical details / SHAP section.
+- [x] Mock data matching the contract in §15.
 
 ### Explicitly out of scope
 

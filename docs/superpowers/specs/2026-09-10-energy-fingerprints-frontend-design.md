@@ -183,7 +183,7 @@ export const ASSETS: readonly AssetMeta[]; // fixed order: pv, battery, heatPump
 export const ASSET_BY_KEY: Record<AssetKey, AssetMeta>;
 /** Asset keys labelled "Likely", highest first, at most `max` (default 2). */
 export function getMarkerAssets(predictions: AssetPrediction, max?: number): AssetKey[];
-/** "EV — 76% likely". Never states an asset as fact. */
+/** "EV — 76% possible". Never states an asset as fact. */
 export function describePrediction(assetKey: AssetKey, probability: number): string;
 ```
 
