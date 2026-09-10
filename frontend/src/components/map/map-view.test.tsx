@@ -2,6 +2,7 @@ import { act, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AARGAU_BBOX } from "@/lib/plz";
 import { initialUIState, useUIStore } from "@/stores/ui-store";
 import { makeBuilding } from "@/test/fixtures";
 import { renderWithProviders } from "@/test/render";
@@ -40,6 +41,8 @@ import { MapView } from "@/components/map/map-view";
 
 type Handler = (event: unknown) => void;
 const feature = (plz: string, count: number) => ({ properties: { plz, name: "x", gemeinde: "x", count } });
+const resize = () =>
+  (mapMock.props.onResize as Handler)({ target: { fitBounds: mapMock.fitBounds } });
 const clickWith = (features: unknown[]) =>
   act(() => (mapMock.props.onClick as Handler)({ features, point: { x: 10, y: 10 } }));
 
@@ -74,6 +77,24 @@ describe("MapView", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent("5000 Aarau · 2 buildings");
     await act(() => (mapMock.props.onMouseLeave as () => void)());
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  it("fits the whole canton on the first resize and never again", async () => {
+    renderWithProviders(<MapView />);
+    await waitFor(() => expect(mapMock.props.onResize).toBeTypeOf("function"));
+    act(() => resize());
+    expect(mapMock.fitBounds).toHaveBeenCalledWith(AARGAU_BBOX, { padding: 24, duration: 0 });
+    act(() => resize());
+    expect(mapMock.fitBounds).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a highlighted area framed when the first resize arrives", async () => {
+    useUIStore.getState().selectPlz("5400");
+    renderWithProviders(<MapView />);
+    await waitFor(() => expect(mapMock.props.onResize).toBeTypeOf("function"));
+    mapMock.fitBounds.mockClear();
+    act(() => resize());
+    expect(mapMock.fitBounds).not.toHaveBeenCalled();
   });
 
   it("fits the map to the highlighted PLZ", async () => {

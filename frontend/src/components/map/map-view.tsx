@@ -4,7 +4,12 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import { setWorkerUrl } from "maplibre-gl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Map, { NavigationControl, type MapLayerMouseEvent, type MapRef } from "react-map-gl/maplibre";
+import Map, {
+  NavigationControl,
+  type MapEvent,
+  type MapLayerMouseEvent,
+  type MapRef,
+} from "react-map-gl/maplibre";
 
 import { MapTooltip } from "@/components/map/map-tooltip";
 import { PLZ_FILL_LAYER_ID, PlzLayers } from "@/components/map/plz-layers";
@@ -19,6 +24,7 @@ setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
 export const MAP_STYLE_URL =
   process.env.NEXT_PUBLIC_MAP_STYLE_URL ?? "https://tiles.openfreemap.org/styles/positron";
 
+const INITIAL_FIT_PADDING = 24;
 const FIT_PADDING = 48;
 const FIT_DURATION_MS = 900;
 const FIT_MAX_ZOOM = 13;
@@ -36,6 +42,7 @@ export function MapView() {
   const selectedPlz = useUIStore((s) => s.selectedPlz);
   const selectPlz = useUIStore((s) => s.selectPlz);
   const [hover, setHover] = useState<Hover>(null);
+  const cantonFittedRef = useRef(false);
 
   const data = useMemo(() => buildPlzGeoJson(counts), [counts]);
 
@@ -69,13 +76,30 @@ export function MapView() {
 
   const clearHover = useCallback(() => setHover(null), []);
 
+  /**
+   * MapLibre reads the container size in its constructor, before the flex layout has
+   * settled on first mount, and falls back to 400x300 — the `initialViewState` fit then
+   * lands far too zoomed out. Its `load` event is not reliable here, so refit on the
+   * first resize, which is exactly when the real size arrives.
+   */
+  const fitCantonOnce = useCallback(
+    (event: MapEvent) => {
+      if (cantonFittedRef.current) return;
+      cantonFittedRef.current = true;
+      if (highlightedPlz) return;
+      event.target.fitBounds(AARGAU_BBOX, { padding: INITIAL_FIT_PADDING, duration: 0 });
+    },
+    [highlightedPlz],
+  );
+
   return (
     <div className="relative h-full w-full" data-testid="map-view">
       <Map
         ref={mapRef}
         mapStyle={MAP_STYLE_URL}
-        initialViewState={{ bounds: AARGAU_BBOX, fitBoundsOptions: { padding: 24 } }}
+        initialViewState={{ bounds: AARGAU_BBOX, fitBoundsOptions: { padding: INITIAL_FIT_PADDING } }}
         interactiveLayerIds={[PLZ_FILL_LAYER_ID]}
+        onResize={fitCantonOnce}
         onClick={handleClick}
         onMouseMove={handleMouseMove}
         onMouseLeave={clearHover}
