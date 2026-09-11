@@ -1,8 +1,8 @@
 # tests/test_api.py
 import polars as pl
 from fastapi.testclient import TestClient
-from osnova.api.app import create_app
 
+from osnova.api.app import create_app
 from osnova.config import Config
 from osnova.export.build_json import build_buildings, write_buildings
 from osnova.export.curate import pick_featured, pick_others

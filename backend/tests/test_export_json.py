@@ -7,11 +7,18 @@ import polars as pl
 
 from osnova.config import Config
 from osnova.events.run import run_events
-from osnova.export.build_json import build_buildings, electricity_for_day, events_for_day, write_buildings
+from osnova.export.build_json import (
+    DEFAULT_REASON,
+    build_buildings,
+    electricity_for_day,
+    events_for_day,
+    write_buildings,
+)
 from osnova.export.curate import pick_featured, pick_others
 from osnova.export.schema import BuildingsFile
 from osnova.io.lastgang import feature_dataset_path
-from osnova.io.store import Store
+from osnova.io.store import PREDICTIONS, Store, assert_schema
+from osnova.models.reasons import EVENT_LINE
 from osnova.synth.generate import ORT
 from tests.helpers import write_synth_by_file, write_synth_feature_dataset, write_synth_weather
 
@@ -30,13 +37,16 @@ def _fake_predictions(gp_of: dict[int, str], truth: dict) -> pl.DataFrame:
                     f"prob_{a}": float(np.clip((0.9 if t[a] else 0.1) + rng.normal(0, 0.05), 0, 1))
                     for a in ASSETS
                 },
+                **{f"raw_{a}": 0.5 for a in ASSETS},
                 "shap_pv": json.dumps([{"feature": "midday_dip_ratio", "contribution": 0.31}]),
                 "shap_battery": "[]",
                 "shap_heat_pump": "[]",
                 "shap_ev": "[]",
             }
         )
-    return pl.DataFrame(rows)
+    preds = pl.DataFrame(rows).select(list(PREDICTIONS)).cast(dict(PREDICTIONS))
+    assert_schema(preds, PREDICTIONS, "fake predictions")
+    return preds
 
 
 def _prepared_store(settings, synth_dir, truth) -> tuple[Store, dict[int, str], pl.DataFrame]:
@@ -82,6 +92,13 @@ def test_export_end_to_end(settings, synth_dir, truth):
     )
     assert b.explanation.assets["pv"].shap[0].feature == "midday_dip_ratio"
     assert b.explanation.assets["ev"].shap == [] and b.explanation.assets["ev"].reasons
+    # reasons come from models.reasons: feature-based bullets plus the band line for events on the day
+    day_types = {e.type for e in b.events}
+    for asset, fe_key, event_type in (("ev", "ev", "ev_charging"), ("pv", "pv", "pv_generation")):
+        reasons = b.explanation.assets[fe_key].reasons
+        assert 1 <= len(reasons) <= 4 and DEFAULT_REASON not in reasons
+        assert (EVENT_LINE in reasons) == (event_type in day_types), (asset, reasons, day_types)
+    assert any("sessions per week" in r for r in b.explanation.assets["ev"].reasons)
     unlabeled_ids = {g for m, g in gp_of.items() if not truth["meters"][str(m)]["labeled"]}
     unlabeled = [x for x in parsed if int(x.id[3:]) in unlabeled_ids]
     assert unlabeled and all(x.groundTruth is None and x.city == x.postcode for x in unlabeled)

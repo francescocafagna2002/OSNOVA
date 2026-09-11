@@ -165,10 +165,16 @@ def features() -> None:
 def events(config: Path | None = ConfigOpt, workers: int = 4) -> None:
     """by_file building series -> events.parquet + showcase.parquet."""
     from osnova.events.run import run_events
+    from osnova.io.lastgang import by_file_dir, by_file_paths
     from osnova.io.store import Store
 
     settings, cfg = _ctx(config)
     store = Store(settings)
+    if not by_file_paths(store):
+        typer.echo(
+            f"no building series under {by_file_dir(store)}; run feature_pipeline ingest first", err=True
+        )
+        raise typer.Exit(code=1)
     ev, sc = run_events(store, cfg, workers=workers)
     by_type = dict(ev.group_by("type").len().sort("type").iter_rows()) if ev.height else {}
     typer.echo(f"{sc.height} buildings, {ev.height} events {by_type}")
@@ -276,6 +282,14 @@ def export(
 
     settings, cfg = _ctx(config)
     store = Store(settings)
+    missing = [
+        p for p in (store.predictions_path(), store.showcase_path(), store.events_path()) if not p.exists()
+    ]
+    if missing:
+        typer.echo(
+            f"missing inputs: {', '.join(map(str, missing))} (run `osnova train` / `osnova events`)", err=True
+        )
+        raise typer.Exit(code=1)
     t0 = time.perf_counter()
     pinned = None if recurate else load_featured(store)
     if pinned is not None:

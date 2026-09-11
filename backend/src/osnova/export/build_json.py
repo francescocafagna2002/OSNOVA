@@ -31,6 +31,7 @@ from osnova.export.schema import (
 )
 from osnova.io.lastgang import feature_dataset_path, gp_nr_expr, load_building_chunk, to_gp_nr
 from osnova.io.store import Store
+from osnova.models.reasons import reasons_for
 
 log = logging.getLogger(__name__)
 
@@ -55,10 +56,12 @@ LABEL_COLUMNS: dict[str, str] = {
     "ev": "label_ev",
 }
 
-ReasonsFn = Callable[[int, str, dict], list[str]]  # (gp_nr, asset, prediction row) -> reasons
+# (asset, feature row, probability, events of the showcase day) -> reasons; models.reasons.reasons_for
+ReasonsFn = Callable[[str, dict, float, pl.DataFrame | None], list[str]]
 
 
-def DEFAULT_REASONS(gp_nr: int, asset: str, pred_row: dict) -> list[str]:  # noqa: N802 - card name
+def DEFAULT_REASONS(asset: str, feats: dict, prob: float, events_day: pl.DataFrame | None) -> list[str]:  # noqa: N802
+    """Fallback when no feature row is available for the building."""
     return [DEFAULT_REASON]
 
 
@@ -100,18 +103,22 @@ def electricity_for_day(day_rows: pl.DataFrame, day: date) -> list[ElectricityPo
     return out
 
 
-def events_for_day(
-    events: pl.DataFrame, day: date, max_events: int = MAX_EVENTS_PER_DAY
-) -> list[BuildingEvent]:
-    """Events touching `day`, including the evening before (EV sessions cross midnight)."""
+def events_in_window(events: pl.DataFrame, day: date, max_events: int = MAX_EVENTS_PER_DAY) -> pl.DataFrame:
+    """Events touching `day`, including the evening before (EV sessions cross midnight), sorted by start."""
     lo = datetime.combine(day - timedelta(days=1), EVENING_BEFORE)
     mid = datetime.combine(day, time())
     hi = mid + timedelta(days=1)
-    sel = (
+    return (
         events.filter((pl.col("start") >= lo) & (pl.col("end") > mid) & (pl.col("start") < hi))
         .sort("start")
         .head(max_events)
     )
+
+
+def events_for_day(
+    events: pl.DataFrame, day: date, max_events: int = MAX_EVENTS_PER_DAY
+) -> list[BuildingEvent]:
+    sel = events_in_window(events, day, max_events)
     return [
         BuildingEvent(
             type=r["type"],
@@ -143,14 +150,17 @@ def build_building(
     day: date,
     day_rows: pl.DataFrame,
     events: pl.DataFrame,
-    label_row: dict | None,
+    feats_row: dict | None,
     featured: bool,
-    reasons_fn: ReasonsFn = DEFAULT_REASONS,
+    reasons_fn: ReasonsFn = reasons_for,
 ) -> Building:
+    """feats_row: the building's feature_dataset row (features + label_*), None when unknown."""
     probs = {a: float(pred_row.get(f"prob_{a}") or 0.0) for a in ASSETS}
+    events_day = events_in_window(events, day)
+    reasons = reasons_fn if feats_row is not None else DEFAULT_REASONS
     assets = {
         ASSET_FE_KEY[a]: AssetExplanation(
-            reasons=reasons_fn(gp_nr, a, pred_row),
+            reasons=reasons(a, feats_row or {}, probs[a], events_day),
             shap=[ShapFeature(**s) for s in json.loads(pred_row.get(f"shap_{a}") or "[]")],
         )
         for a in ASSETS
@@ -173,7 +183,7 @@ def build_building(
         ),
         featured=featured,
         profileDate=day.isoformat(),
-        groundTruth=ground_truth(label_row),
+        groundTruth=ground_truth(feats_row),
         history=[],
     )
 
@@ -186,17 +196,25 @@ class ExportInputs:
     predictions: pl.DataFrame  # one row per gp_nr
     showcase: pl.DataFrame
     events: pl.DataFrame
-    labels: pl.DataFrame | None  # feature_dataset.parquet: gp_nr, plz, label_*
+    features: pl.DataFrame | None  # feature_dataset.parquet: gp_nr, plz, features, label_*
     gigi: dict[int, dict[str, str]]  # gp_nr -> {"ort", "kanton"} from Table 2 (GIGI), when present
 
 
-def load_labels(store: Store) -> pl.DataFrame | None:
+def load_features(store: Store) -> pl.DataFrame | None:
+    """The whole feature table (keys, features, label_*), one row per gp_nr; None when absent."""
     path = feature_dataset_path(store)
     if not path.exists():
         return None
-    df = pl.read_parquet(path)
-    cols = ["gp_nr", *[c for c in ("plz", *LABEL_COLUMNS.values()) if c in df.columns]]
-    return _gp_int(df.select(cols)).unique("gp_nr", keep="first")
+    return _gp_int(pl.read_parquet(path)).unique("gp_nr", keep="first")
+
+
+def load_labels(store: Store) -> pl.DataFrame | None:
+    """gp_nr, plz, num_mp_ids and the label_* columns of the feature table (curation input)."""
+    df = load_features(store)
+    if df is None:
+        return None
+    keep = ["gp_nr", *[c for c in ("plz", "num_mp_ids", *LABEL_COLUMNS.values()) if c in df.columns]]
+    return df.select(keep)
 
 
 def find_gigi_file(registry_root: Path) -> Path | None:
@@ -247,7 +265,7 @@ def load_inputs(store: Store) -> ExportInputs:
         predictions=latest_predictions(pl.read_parquet(store.predictions_path())),
         showcase=_gp_int(pl.read_parquet(store.showcase_path())),
         events=_gp_int(pl.read_parquet(store.events_path())),
-        labels=load_labels(store),
+        features=load_features(store),
         gigi=load_gigi(store.settings.registry_root),
     )
 
@@ -260,7 +278,7 @@ def build_buildings(
     cfg: Config,
     featured_ids: list[int],
     other_ids: list[int],
-    reasons_fn: ReasonsFn = DEFAULT_REASONS,
+    reasons_fn: ReasonsFn = reasons_for,
 ) -> list[Building]:
     """Featured first, then the others. Buildings without predictions or series are skipped (logged)."""
     inputs = load_inputs(store)
@@ -268,7 +286,9 @@ def build_buildings(
     series_by_gp = load_building_chunk(store, [g for g, _ in wanted])
     preds = {r["gp_nr"]: r for r in inputs.predictions.iter_rows(named=True)}
     showcase = {r["gp_nr"]: r for r in inputs.showcase.iter_rows(named=True)}
-    labels = {r["gp_nr"]: r for r in inputs.labels.iter_rows(named=True)} if inputs.labels is not None else {}
+    feats = (
+        {r["gp_nr"]: r for r in inputs.features.iter_rows(named=True)} if inputs.features is not None else {}
+    )
     events_by_gp = inputs.events.partition_by("gp_nr", as_dict=True)
     out: list[Building] = []
     for gp, featured in wanted:
@@ -283,8 +303,8 @@ def build_buildings(
             if sc is not None and sc["showcase_date"] is not None
             else last_full_day(series)
         )
-        label_row = labels.get(gp)
-        plz = series["plz"].drop_nulls().first() or (label_row or {}).get("plz") or ""
+        feats_row = feats.get(gp)
+        plz = series["plz"].drop_nulls().first() or (feats_row or {}).get("plz") or ""
         gigi = inputs.gigi.get(gp, {})
         out.append(
             build_building(
@@ -296,7 +316,7 @@ def build_buildings(
                 day=day,
                 day_rows=series.filter(pl.col("ts").dt.date() == day),
                 events=events_by_gp.get((gp,), inputs.events.head(0)),
-                label_row=label_row,
+                feats_row=feats_row,
                 featured=featured,
                 reasons_fn=reasons_fn,
             )
