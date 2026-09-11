@@ -9,7 +9,13 @@ export type ElectricityPoint = {
   powerKw: number; // net power; negative = export to grid
 };
 
-export const EVENT_TYPES = ["ev_charging", "pv_generation", "high_consumption"] as const;
+export const EVENT_TYPES = [
+  "ev_charging",
+  "pv_generation",
+  "heat_pump_heating",
+  "battery_cycle",
+  "high_consumption",
+] as const;
 export type BuildingEventType = (typeof EVENT_TYPES)[number];
 
 export type BuildingEvent = {
