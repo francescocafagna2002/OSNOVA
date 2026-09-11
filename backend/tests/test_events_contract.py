@@ -3,10 +3,10 @@
 
 import polars as pl
 
-from osnova.io.store import EVENTS, SHOWCASE
+from osnova.io.store import EVENTS, FEATURE_KEYS, SHOWCASE
 
 
 def test_events_and_showcase_are_keyed_by_gp_nr():
-    assert EVENTS["gp_nr"] == pl.String and "meter_id" not in EVENTS
-    assert SHOWCASE["gp_nr"] == pl.String and "meter_id" not in SHOWCASE
+    assert EVENTS["gp_nr"] == FEATURE_KEYS["gp_nr"] == pl.Int64 and "meter_id" not in EVENTS
+    assert SHOWCASE["gp_nr"] == pl.Int64 and "meter_id" not in SHOWCASE
     assert list(EVENTS.keys())[0] == "gp_nr" and list(SHOWCASE.keys())[0] == "gp_nr"

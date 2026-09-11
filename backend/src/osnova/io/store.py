@@ -73,10 +73,10 @@ WEATHER = pl.Schema(
 # feature_pipeline/pipeline.py. PREDICTIONS / EVENTS / SHOWCASE move to gp_nr in Sessions 2 and 3.
 FEATURE_KEYS = pl.Schema({"gp_nr": I64, "plz": STR, "n_valid_days": I32})
 LABELS = pl.Schema({"gp_nr": I64, "asset": STR, "label": pl.Int8, "weight": F32, "source": STR})
-# Events and showcase are keyed by building (gp_nr, the by_file Parquet key), decision 2026-09-11.
+# Events and showcase are keyed by building (gp_nr as in FEATURE_KEYS), decision 2026-09-11.
 EVENTS = pl.Schema(
     {
-        "gp_nr": STR,
+        "gp_nr": I64,
         "type": STR,
         "start": DT,
         "end": DT,
@@ -85,7 +85,7 @@ EVENTS = pl.Schema(
         "energy_kwh": F32,
     }
 )
-SHOWCASE = pl.Schema({"gp_nr": STR, "showcase_date": pl.Date, "n_event_types": I32})
+SHOWCASE = pl.Schema({"gp_nr": I64, "showcase_date": pl.Date, "n_event_types": I32})
 PREDICTIONS = pl.Schema(
     {
         "gp_nr": I64,  # one row per building, whole history
