@@ -197,13 +197,30 @@ def run_ingest(
     by_file_dir.mkdir(parents=True, exist_ok=True)
     manifest = _load_manifest(paths.manifest_path) if resume else {"files": {}}
 
-    for path in files:
+    # Computed once, not per file: the full MP-id set (for the unmapped-MP
+    # audit) and a running "distinct buildings covered so far" count, so a
+    # long ingest run (the slow step on the real 90k-building dataset) prints
+    # visible progress instead of going quiet for minutes.
+    all_mapped_mp_ids = set(mapping_df.get_column("mp_id").to_list())
+    total_buildings = mapping_df.get_column("gp_nr").n_unique()
+    buildings_seen: set[str] = set()
+
+    for i, path in enumerate(files, start=1):
         key = str(path)
         fingerprint = _file_fingerprint(path)
         out_path = by_file_dir / f"{path.stem}.parquet"
         cached = manifest["files"].get(key)
         if resume and cached == fingerprint and out_path.exists():
             audit.files_skipped_cached += 1
+            # Still worth folding into the running building count: cheap,
+            # since the per-file parquet already has the distinct gp_nrs.
+            buildings_seen |= set(
+                pl.scan_parquet(out_path).select("gp_nr").unique().collect().get_column("gp_nr")
+            )
+            logger.info(
+                "[%d/%d] cached, skipping %s — buildings covered so far: %d/%d",
+                i, len(files), path.name, len(buildings_seen), total_buildings,
+            )
             continue
 
         try:
@@ -214,12 +231,18 @@ def run_ingest(
             audit.files_failed.append(key)
             continue
 
-        audit.mapped_mp_ids_seen |= mp_ids_in_file & set(
-            mapping_df.get_column("mp_id").to_list()
-        )
-        audit.unmapped_mp_ids |= mp_ids_in_file - set(mapping_df.get_column("mp_id").to_list())
+        audit.mapped_mp_ids_seen |= mp_ids_in_file & all_mapped_mp_ids
+        audit.unmapped_mp_ids |= mp_ids_in_file - all_mapped_mp_ids
         manifest["files"][key] = fingerprint
         audit.files_processed_this_run += 1
+
+        buildings_seen |= set(
+            pl.scan_parquet(out_path).select("gp_nr").unique().collect().get_column("gp_nr")
+        )
+        logger.info(
+            "[%d/%d] ingested %s (%d MP ids seen) — buildings covered so far: %d/%d",
+            i, len(files), path.name, len(mp_ids_in_file), len(buildings_seen), total_buildings,
+        )
 
     _save_manifest(paths.manifest_path, manifest)
     return audit

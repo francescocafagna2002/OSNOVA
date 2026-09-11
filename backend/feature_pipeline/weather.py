@@ -118,11 +118,21 @@ def load_weather(paths: PathsConfig, cfg: ThresholdsConfig) -> WeatherData:
             "ts",
         )
         if time_col is None:
-            logger.warning(
-                "Weather file %s has no recognised time column, skipping. Actual columns: %r",
-                path,
-                raw.columns,
-            )
+            has_any_weather_value_col = find_column(raw.columns, *HOURLY_VALUE_COLUMNS) is not None
+            if has_any_weather_value_col:
+                # Looks like real weather data but the time column wasn't
+                # recognised — worth flagging loudly, this is a data problem.
+                logger.warning(
+                    "Weather file %s has no recognised time column, skipping. Actual columns: %r",
+                    path,
+                    raw.columns,
+                )
+            else:
+                # No time column AND no weather variables at all -> this is
+                # some other sidecar file (e.g. a PLZ/coordinate lookup) that
+                # happens to sit next to the real weather files, not a broken
+                # weather file. Quiet by design so it doesn't look like an error.
+                logger.debug("Skipping non-weather file %s (columns: %r)", path, raw.columns)
             continue
 
         # Priority: the real layout's PLZ-named parent directory, then an
