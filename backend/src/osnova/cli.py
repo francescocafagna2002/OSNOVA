@@ -1,5 +1,9 @@
 # src/osnova/cli.py
-"""osnova <stage> — one subcommand per pipeline stage. Stubs are replaced by the owning stream."""
+"""osnova <stage> — one subcommand per pipeline stage. Stubs are replaced by the owning session.
+
+registry / ingest / features are retired: feature_pipeline (scripts/build_feature_dataset.py) does
+ingest + features at the building (gp_nr) grain.
+"""
 
 from __future__ import annotations
 
@@ -21,6 +25,18 @@ def _ctx(config: Path | None) -> tuple[OsnovaSettings, Config]:
 
 def _stub(stream: str, card: str) -> None:
     typer.echo(f"not implemented: {stream} card {card}", err=False)
+    raise typer.Exit(code=2)
+
+
+FEATURE_PIPELINE_HINT = (
+    "retired: ingest and features are done by feature_pipeline at the building (gp_nr) grain. "
+    "Run `python3 scripts/build_feature_dataset.py --help` from backend/ "
+    "(output: $OSNOVA_STORE_DIR/osnova/feature_output/feature_dataset.parquet)."
+)
+
+
+def _retired() -> None:
+    typer.echo(FEATURE_PIPELINE_HINT)
     raise typer.Exit(code=2)
 
 
@@ -82,17 +98,15 @@ def check_data(
 
 
 @app.command()
-def registry(config: Path | None = ConfigOpt) -> None:
-    """Tables 2-4 -> registry.parquet and cohort.parquet."""
-    _stub("Stream A", "A2")
+def registry() -> None:
+    """Retired: done by feature_pipeline (mapping.py, labels.py)."""
+    _retired()
 
 
 @app.command()
-def ingest(
-    config: Path | None = ConfigOpt, limit_files: int | None = typer.Option(None, "--limit-files")
-) -> None:
-    """Table 1 CSVs -> lastgang/bucket=NN/part.parquet for the cohort."""
-    _stub("Stream A", "A3")
+def ingest() -> None:
+    """Retired: done by feature_pipeline (ingest.py)."""
+    _retired()
 
 
 @app.command()
@@ -133,33 +147,33 @@ def weather(config: Path | None = ConfigOpt) -> None:
 
 
 @app.command()
-def features(config: Path | None = ConfigOpt, workers: int = 4) -> None:
-    """lastgang + weather -> features.parquet (one row per meter-year)."""
-    _stub("Stream B", "B6")
+def features() -> None:
+    """Retired: done by feature_pipeline (features.py, pipeline.py), one row per gp_nr."""
+    _retired()
 
 
 @app.command()
 def events(config: Path | None = ConfigOpt, workers: int = 4) -> None:
-    """lastgang -> events.parquet + showcase.parquet."""
-    _stub("Stream C", "C3")
+    """Building series (feature_output/intermediate) -> events.parquet + showcase.parquet."""
+    _stub("Session 3", "C3")
 
 
 @app.command()
 def train(config: Path | None = ConfigOpt) -> None:
-    """features + registry -> labels, models, predictions.parquet, metrics.json."""
-    _stub("Stream D", "D2")
+    """feature_dataset.parquet -> labels, models, predictions.parquet, metrics.json."""
+    _stub("Session 2", "D2")
 
 
 @app.command()
 def export(config: Path | None = ConfigOpt, featured: int = 10, others: int = 200) -> None:
-    """Everything -> export/buildings.json."""
-    _stub("Stream C", "C4")
+    """Everything -> export/buildings.json (id = AG-{gp_nr})."""
+    _stub("Session 3", "C4")
 
 
 @app.command()
 def api(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Serve the exported JSON over HTTP."""
-    _stub("Stream C", "C7")
+    _stub("Session 3", "C7")
 
 
 if __name__ == "__main__":

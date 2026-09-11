@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Revision 2026-09-11 — building (`gp_nr`) grain on top of `feature_pipeline`.** Team decision: the grain is one row per building (`gp_nr`, whole history), FE id `f"AG-{gp_nr}"`. `backend/feature_pipeline/` (branch `feat/backend-feature-pipeline`) is the ingest + feature engine and handles the real layouts, so cards A2, A3 and B1–B6 are **superseded** (banner on each card). Per-year labels and the `history` field are dropped: labels are three-valued per asset from the GIGI flags (`x` = 1, `-` = 0, blank = unknown, excluded per asset), positives commissioned after 2025-07-01 are excluded, unlabeled buildings are weak negatives; `buildings.json` emits `history: []` and `groundTruth` from the labels. C and D cards carry a one-line grain banner; read them with `meter_id` → `gp_nr` and no `year`. The work is split into four sessions (design spec, "Revision 2026-09-11"; team plan §1). `FEATURE_KEYS` in `io/store.py` is `gp_nr, plz, n_valid_days` (commit `contract: feature keys are gp_nr`); `PREDICTIONS`/`LABELS` change in Session 2's contract commit, `EVENTS`/`SHOWCASE` in Session 3's. Cards T0-1…T0-8, A1 and A4 are done. Everything below is the 2026-09-10 plan, kept as written.
+
 **Goal:** Build the batch pipeline that turns AEW 15-minute smart-meter data into `buildings.json` for the frontend: four asset probabilities, one showcase day, event bands and SHAP explanations per building.
 
 **Architecture:** Seven CLI stages over Parquet on the Renku `store` mount (registry → ingest → weather → features → events → train → export). A synthetic-data generator that writes the real file formats makes every stage testable on laptops without real data. Four streams (data, features, events+export, models) run in parallel after a shared skeleton (T0) fixes the schemas.
@@ -1654,6 +1656,8 @@ def test_check_data_on_synth(synth_dir: Path, truth: dict):
 
 ### Task A2: `registry`
 
+> **Superseded 2026-09-11 by feature_pipeline:** `feature_pipeline/mapping.py` + `feature_pipeline/labels.py`; the `registry` CLI stub is retired. Not to be implemented.
+
 **Files:**
 - Create: `backend/src/osnova/io/registry.py`
 - Modify: `backend/src/osnova/cli.py` (`registry` stub)
@@ -1710,6 +1714,8 @@ def test_cohort_has_all_labeled_and_sample(synth_dir: Path, truth: dict):
 - [ ] **Step 4: Run tests** — PASS. **Step 5: Commit** `feat(backend): registry stage (tables 2-4 -> registry.parquet, cohort.parquet)`. Human runs `uv run osnova registry` on Renku and posts the manifest.
 
 ### Task A3: `ingest`
+
+> **Superseded 2026-09-11 by feature_pipeline:** `feature_pipeline/ingest.py`, building series under `feature_output/intermediate/by_file/`; the `ingest` CLI stub is retired. Session 1 adds the cohort filter, the OBIS import/export pivot and the unit factor. Not to be implemented.
 
 **Files:**
 - Create: `backend/src/osnova/io/lastgang.py`
@@ -1852,6 +1858,8 @@ def test_write_and_load(settings):
 
 # Stream B — Features (`src/osnova/features/`) — branch `feat/be-features`
 
+> **Superseded 2026-09-11 by feature_pipeline** (Session 1). Every card in this stream is done there; nothing to implement in `src/osnova/features/`.
+
 Spec: design §3.5. Inputs come from `osnova.synth.loader` (T0-6) so nothing here waits for Stream A. **B2 needs C1 merged.**
 
 Shared test helper used by every B card (create in B1, `tests/helpers.py`):
@@ -1880,6 +1888,8 @@ def pick(truth: dict, **flags: bool) -> int:
 ```
 
 ### Task B1: common features
+
+> **Superseded 2026-09-11 by feature_pipeline:** `feature_pipeline/features.py`. Not to be implemented.
 
 **Files:**
 - Create: `backend/src/osnova/features/common.py`, `backend/tests/helpers.py`
@@ -1917,6 +1927,8 @@ def test_common_features_on_pv_and_plain_meters(synth_dir, truth):
 
 ### Task B2: EV features (needs C1 merged)
 
+> **Superseded 2026-09-11 by feature_pipeline:** `feature_pipeline/features.py` + `sessions.py` (its own session detector; C1 stays the event detector). Not to be implemented.
+
 **Files:**
 - Create: `backend/src/osnova/features/ev.py`
 - Test: `backend/tests/test_features_ev.py`
@@ -1948,6 +1960,8 @@ def test_ev_features_separate_ev_from_plain(synth_dir, truth):
 - [ ] **Step 2–5:** run (fail) → implement → run (pass) → commit `feat(backend): ev features`.
 
 ### Task B3: heat-pump features
+
+> **Superseded 2026-09-11 by feature_pipeline:** `feature_pipeline/features.py`. Not to be implemented.
 
 **Files:**
 - Create: `backend/src/osnova/features/heatpump.py`
@@ -1988,6 +2002,8 @@ def test_missing_weather_gives_nan_not_error(synth_dir, truth):
 
 ### Task B4: PV features
 
+> **Superseded 2026-09-11 by feature_pipeline:** `feature_pipeline/features.py`. Not to be implemented.
+
 **Files:**
 - Create: `backend/src/osnova/features/pv.py`
 - Test: `backend/tests/test_features_pv.py`
@@ -2019,6 +2035,8 @@ def test_pv_features(synth_dir, truth):
 
 ### Task B5: battery features
 
+> **Superseded 2026-09-11 by feature_pipeline:** `feature_pipeline/features.py` (`pv_presence` reserved for the out-of-fold PV probability). Not to be implemented.
+
 **Files:**
 - Create: `backend/src/osnova/features/battery.py`
 - Test: `backend/tests/test_features_battery.py`
@@ -2048,6 +2066,8 @@ def test_battery_features(synth_dir, truth):
 - [ ] **Step 2–5:** run (fail) → implement → run (pass) → commit `feat(backend): battery features`.
 
 ### Task B6: feature build runner + CLI (needs A3, A4 merged for the integration test)
+
+> **Superseded 2026-09-11 by feature_pipeline:** `feature_pipeline/pipeline.py` via `scripts/build_feature_dataset.py`; the `features` CLI stub is retired. Not to be implemented.
 
 **Files:**
 - Create: `backend/src/osnova/features/build.py`, `backend/src/osnova/features/__init__.py` (import all groups so they register)
@@ -2092,9 +2112,13 @@ def test_build_features_end_to_end(settings, truth):
 
 # Stream C — Events, export, FE glue, API (`src/osnova/events/`, `export/`, `api/`) — branch `feat/be-events`
 
+> **Session 3 (2026-09-11), grain `gp_nr`.** Input is the building series from `feature_output/intermediate/by_file/` and `feature_dataset.parquet`; `history: []`, `groundTruth` from labels.
+
 Spec: design §3.6, §3.8, §3.9. **C1 is the first card of the whole Phase 1** because Stream B's EV features depend on it.
 
 ### Task C1: EV session detector
+
+> **Grain: `gp_nr`, see the revision note at the top** (`meter_id` → `gp_nr`, no `year`, input `feature_output/feature_dataset.parquet`).
 
 **Files:**
 - Modify: `backend/src/osnova/events/ev_sessions.py` (replace the `NotImplementedError` body; keep the signature and `SESSION_SCHEMA`)
@@ -2206,6 +2230,8 @@ def detect_ev_sessions(ts, import_kw, cfg: EventConfig) -> pl.DataFrame:
 
 ### Task C2: PV generation windows
 
+> **Grain: `gp_nr`, see the revision note at the top** (`meter_id` → `gp_nr`, no `year`, input `feature_output/feature_dataset.parquet`).
+
 **Files:**
 - Create: `backend/src/osnova/events/pv_windows.py`
 - Test: `backend/tests/test_events_pv.py`
@@ -2243,6 +2269,8 @@ def test_no_windows_without_pv(synth_dir, truth):
 - [ ] **Step 2–5:** run (fail) → implement with `group_by(pl.col("ts").dt.date())` and a small per-day numpy function for the run search → run (pass) → commit `feat(backend): pv generation window detector`.
 
 ### Task C3: high-load fallback, showcase day, `events` stage
+
+> **Grain: `gp_nr`, see the revision note at the top** (`meter_id` → `gp_nr`, no `year`, input `feature_output/feature_dataset.parquet`).
 
 **Files:**
 - Create: `backend/src/osnova/events/high_load.py`, `backend/src/osnova/events/showcase.py`, `backend/src/osnova/events/run.py`
@@ -2303,6 +2331,8 @@ def test_run_events_on_synth(settings, truth):
 - [ ] **Step 2–5:** run (fail) → implement (`run.py` loads each bucket with `pl.read_parquet(store.bucket_path(b))`, `partition_by("meter_id")`, loads weather per PLZ via `load_weather` and joins with `upsample_15min` as in `make_meter_year`, calls detectors, `ProcessPoolExecutor` over buckets) → run (pass) → commit `feat(backend): events stage with showcase-day selection`.
 
 ### Task C4: `buildings.json` exporter and curation
+
+> **Grain: `gp_nr`, see the revision note at the top** (`meter_id` → `gp_nr`, no `year`, input `feature_output/feature_dataset.parquet`).
 
 **Files:**
 - Create: `backend/src/osnova/export/build_json.py`, `backend/src/osnova/export/curate.py`
@@ -2391,6 +2421,8 @@ def test_electricity_for_day_fills_gaps():
 
 ### Task C5: frontend glue PR (branch `feat/fe-backend-data`, in `frontend/`)
 
+> **Grain: `gp_nr`, see the revision note at the top** (`meter_id` → `gp_nr`, no `year`, input `feature_output/feature_dataset.parquet`).
+
 **Files:**
 - Modify: `frontend/src/lib/types.ts`, `frontend/src/lib/events.ts`, `frontend/src/lib/chart-option.ts`, `frontend/src/lib/api.ts`
 - Test: `frontend/src/lib/api.test.ts` (new), existing `chart-option.test.ts`
@@ -2427,6 +2459,8 @@ export async function fetchBuildings(): Promise<Building[]> {
 - [ ] **Step 5: Commit** `feat(frontend): load backend buildings.json with mock fallback and two new event types`; PR to `main`.
 
 ### Task C6: heat-pump and battery event detectors
+
+> **Grain: `gp_nr`, see the revision note at the top** (`meter_id` → `gp_nr`, no `year`, input `feature_output/feature_dataset.parquet`).
 
 **Files:**
 - Create: `backend/src/osnova/events/hp_heating.py`, `backend/src/osnova/events/battery_cycles.py`
@@ -2467,6 +2501,8 @@ def test_battery_cycles(synth_dir, truth):
 
 ### Task C7: FastAPI (optional, first on the cut list)
 
+> **Grain: `gp_nr`, see the revision note at the top** (`meter_id` → `gp_nr`, no `year`, input `feature_output/feature_dataset.parquet`).
+
 **Files:**
 - Create: `backend/src/osnova/api/app.py`
 - Modify: `backend/src/osnova/cli.py` (`api` stub → `uvicorn.run(create_app(store), host=host, port=port)`)
@@ -2482,9 +2518,13 @@ def test_battery_cycles(synth_dir, truth):
 
 # Stream D — Labels and models (`src/osnova/labels/`, `models/`) — branch `feat/be-models`
 
+> **Session 2 (2026-09-11), grain `gp_nr`.** Labels are three-valued per asset from `label_*` in `feature_dataset.parquet` (design §3.7 revised); no meter-year rows, no `GroupKFold` by `gp_nr` needed.
+
 Spec: design §3.7. D1 and D2 need only T0; D2's unit test builds its own informative feature table so it does not wait for Stream B. The integration test in D5 needs B6.
 
 ### Task D1: labels (positive-unlabeled, commissioning dates)
+
+> **Grain: `gp_nr`, see the revision note at the top** (`meter_id` → `gp_nr`, no `year`, input `feature_output/feature_dataset.parquet`).
 
 **Files:**
 - Create: `backend/src/osnova/labels/build.py`
@@ -2542,6 +2582,8 @@ def test_label_rules():
 - [ ] **Step 2–5:** run (fail) → implement (cross-join `meter_years × ASSETS`, join registry, `pl.when` chains, filter the ambiguous rows out, cast to `LABELS`) → run (pass) → commit `feat(backend): meter-year labels with commissioning dates and PU weights`.
 
 ### Task D2: training, metrics, rule baseline, `train` stage
+
+> **Grain: `gp_nr`, see the revision note at the top** (`meter_id` → `gp_nr`, no `year`, input `feature_output/feature_dataset.parquet`).
 
 **Files:**
 - Create: `backend/src/osnova/models/train.py`, `backend/src/osnova/models/baseline.py`
@@ -2622,6 +2664,8 @@ def test_baseline_scores_shape():
 
 ### Task D3: calibration
 
+> **Grain: `gp_nr`, see the revision note at the top** (`meter_id` → `gp_nr`, no `year`, input `feature_output/feature_dataset.parquet`).
+
 **Files:**
 - Modify: `backend/src/osnova/models/train.py`
 - Test: `backend/tests/test_train.py` (add)
@@ -2633,6 +2677,8 @@ def test_baseline_scores_shape():
 - [ ] **Step 2–5:** run (fail) → implement → run (pass) → commit `feat(backend): isotonic calibration on registry rows` (+ the `contract:` commit for the schema).
 
 ### Task D4: SHAP explanations and reasons text
+
+> **Grain: `gp_nr`, see the revision note at the top** (`meter_id` → `gp_nr`, no `year`, input `feature_output/feature_dataset.parquet`).
 
 **Files:**
 - Create: `backend/src/osnova/models/explain.py`, `backend/src/osnova/models/reasons.py`
@@ -2681,6 +2727,8 @@ Add to `tests/test_train.py`: after `train_all`, `json.loads(result.predictions[
 
 ### Task D5: battery second stage, integration on synth features
 
+> **Grain: `gp_nr`, see the revision note at the top** (`meter_id` → `gp_nr`, no `year`, input `feature_output/feature_dataset.parquet`).
+
 **Files:**
 - Modify: `backend/src/osnova/models/train.py`
 - Test: `backend/tests/test_train.py` (add), needs B6 merged for the integration test
@@ -2694,6 +2742,8 @@ Add to `tests/test_train.py`: after `train_all`, `json.loads(result.predictions[
 ---
 
 # Phase 4 — Integration on Renku (everyone, Day 2 morning)
+
+> **2026-09-11:** Session 4 runs this. Replace `uv run osnova features` with Session 1's `python3 scripts/build_feature_dataset.py …` run; `train`, `events`, `export` read `feature_output/`. The `history` example in the presentation line is dropped.
 
 - [ ] Rebase all stream branches on `main`; merge in the order A → C1 → B → D → C.
 - [ ] On Renku: `git pull && uv sync`, then `uv run osnova features --workers 8`, `uv run osnova train`, `uv run osnova events --workers 8`, `uv run osnova export --featured 10 --others 200`. Each stage's manifest is posted in chat.

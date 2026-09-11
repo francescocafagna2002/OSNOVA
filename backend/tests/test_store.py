@@ -6,7 +6,7 @@ import polars as pl
 import pytest
 
 from osnova.config import OsnovaSettings
-from osnova.io.store import LASTGANG, SchemaError, Store, assert_schema
+from osnova.io.store import FEATURE_KEYS, LASTGANG, SchemaError, Store, assert_schema
 from osnova.io.weather import upsample_15min
 
 
@@ -15,6 +15,20 @@ def test_store_paths(tmp_path: Path):
     assert st.lastgang_dir() == tmp_path / "osnova" / "lastgang"
     assert st.bucket_path(5) == tmp_path / "osnova" / "lastgang" / "bucket=05" / "part.parquet"
     assert st.buildings_json() == tmp_path / "osnova" / "export" / "buildings.json"
+    assert st.features_path() == tmp_path / "osnova" / "feature_output" / "feature_dataset.parquet"
+
+
+def test_feature_keys_are_building_grain():
+    """Team decision 2026-09-11: one row per building, no meter_id, no year."""
+    assert list(FEATURE_KEYS) == ["gp_nr", "plz", "n_valid_days"]
+    assert FEATURE_KEYS["gp_nr"] == pl.Int64 and FEATURE_KEYS["n_valid_days"] == pl.Int32
+    row = pl.DataFrame(
+        {"gp_nr": [123456], "plz": ["5000"], "n_valid_days": [700], "total_export_kwh": [12.5]}
+    ).cast({"gp_nr": pl.Int64, "n_valid_days": pl.Int32})
+    assert_schema(row, FEATURE_KEYS, "features", subset=True)
+    with pytest.raises(SchemaError):
+        old_grain = row.drop("gp_nr").with_columns(meter_id=pl.lit(1))
+        assert_schema(old_grain, FEATURE_KEYS, "features", subset=True)
 
 
 def test_assert_schema_rejects_wrong_dtype():
