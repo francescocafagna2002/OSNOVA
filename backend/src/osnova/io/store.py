@@ -72,9 +72,7 @@ WEATHER = pl.Schema(
 # history, team decision 2026-09-11). These are the key columns; feature columns are FINAL_COLUMNS in
 # feature_pipeline/pipeline.py. PREDICTIONS / EVENTS / SHOWCASE move to gp_nr in Sessions 2 and 3.
 FEATURE_KEYS = pl.Schema({"gp_nr": I64, "plz": STR, "n_valid_days": I32})
-LABELS = pl.Schema(
-    {"meter_id": I64, "year": I32, "gp_nr": I64, "asset": STR, "label": pl.Int8, "weight": F32, "source": STR}
-)
+LABELS = pl.Schema({"gp_nr": I64, "asset": STR, "label": pl.Int8, "weight": F32, "source": STR})
 EVENTS = pl.Schema(
     {
         "meter_id": I64,
@@ -89,16 +87,19 @@ EVENTS = pl.Schema(
 SHOWCASE = pl.Schema({"meter_id": I64, "showcase_date": pl.Date, "n_event_types": I32})
 PREDICTIONS = pl.Schema(
     {
-        "meter_id": I64,
-        "year": I32,
-        "prob_pv": F32,
+        "gp_nr": I64,  # one row per building, whole history
+        "prob_pv": F32,  # calibrated
         "prob_battery": F32,
         "prob_heat_pump": F32,
         "prob_ev": F32,
-        "shap_pv": STR,
+        "raw_pv": F32,  # uncalibrated LightGBM score
+        "raw_battery": F32,
+        "raw_heat_pump": F32,
+        "raw_ev": F32,
+        "shap_pv": STR,  # JSON list of {"feature", "contribution"}, top 6 by |contribution|
         "shap_battery": STR,
         "shap_heat_pump": STR,
-        "shap_ev": STR,  # JSON lists
+        "shap_ev": STR,
     }
 )
 

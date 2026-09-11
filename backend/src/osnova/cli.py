@@ -17,6 +17,15 @@ app = typer.Typer(no_args_is_help=True, help="OSNOVA prediction engine")
 ConfigOpt = typer.Option(None, "--config", help="JSON file overriding config defaults")
 OutOpt = typer.Option(..., "--out")
 YearsOpt = typer.Option([2023, 2024], "--years")
+FeaturesOpt = typer.Option(
+    None, "--features", help="feature_dataset.parquet; default <store>/osnova/feature_output/"
+)
+DatesOpt = typer.Option(
+    None,
+    "--dates",
+    help="GIGI dates parquet (gp_nr, commissioned_pv/ev/heatpump/battery); "
+    "default <store>/osnova/feature_output/gigi_dates.parquet, skipped when absent",
+)
 
 
 def _ctx(config: Path | None) -> tuple[OsnovaSettings, Config]:
@@ -159,9 +168,81 @@ def events(config: Path | None = ConfigOpt, workers: int = 4) -> None:
 
 
 @app.command()
-def train(config: Path | None = ConfigOpt) -> None:
-    """feature_dataset.parquet -> labels, models, predictions.parquet, metrics.json."""
-    _stub("Session 2", "D2")
+def train(
+    config: Path | None = ConfigOpt,
+    features: Path | None = FeaturesOpt,
+    dates: Path | None = DatesOpt,
+) -> None:
+    """feature_dataset.parquet + GIGI dates -> labels.parquet, models/, predictions.parquet, metrics.json."""
+    import time
+
+    import polars as pl
+
+    from osnova.io.store import Store
+    from osnova.labels.build import build_labels
+    from osnova.models.train import TRAIN_ORDER, train_all
+
+    settings, cfg = _ctx(config)
+    store = Store(settings)
+    t0 = time.perf_counter()
+    features_path = features or store.features_path()
+    dates_path = dates or store.feature_output_dir() / "gigi_dates.parquet"
+    if not features_path.exists():
+        typer.echo(f"missing {features_path} (feature_dataset.parquet from feature_pipeline)", err=True)
+        raise typer.Exit(code=1)
+    table = pl.read_parquet(features_path).with_columns(pl.col("gp_nr").cast(pl.Int64, strict=False))
+    n_bad_gp = table["gp_nr"].is_null().sum()
+    table = table.filter(pl.col("gp_nr").is_not_null()).unique("gp_nr", keep="first").sort("gp_nr")
+    gigi_dates = pl.read_parquet(dates_path) if dates_path.exists() else None
+    if gigi_dates is None:
+        typer.echo(f"no commissioning dates at {dates_path}: every flagged asset counts as visible")
+    labels = build_labels(table, gigi_dates, cfg.labels)
+    labels.write_parquet(store.labels_path())
+    result = train_all(table, labels, cfg, store.models_dir())
+    result.predictions.write_parquet(store.predictions_path())
+    label_counts = {
+        a: {
+            "positive": labels.filter((pl.col("asset") == a) & (pl.col("label") == 1)).height,
+            "registry_negative": labels.filter(
+                (pl.col("asset") == a) & (pl.col("label") == 0) & (pl.col("source") == "registry")
+            ).height,
+            "unlabeled": labels.filter((pl.col("asset") == a) & (pl.col("source") == "unlabeled")).height,
+        }
+        for a in TRAIN_ORDER
+    }
+    store.write_manifest(
+        "train",
+        config=cfg.model_dump(),
+        inputs={"features": features_path, "dates": dates_path if gigi_dates is not None else None},
+        outputs={
+            "labels": store.labels_path(),
+            "predictions": store.predictions_path(),
+            "models_dir": store.models_dir(),
+        },
+        n_buildings=table.height,
+        n_dropped_gp_nr=int(n_bad_gp),
+        labels=label_counts,
+        registry_roc_auc={a: result.metrics[a]["registry"]["roc_auc"] for a in TRAIN_ORDER},
+        duration_s=round(time.perf_counter() - t0, 1),
+    )
+    typer.echo(_metrics_table(result.metrics))
+    typer.echo(f"wrote {result.predictions.height} predictions to {store.predictions_path()}")
+
+
+def _metrics_table(metrics: dict) -> str:
+    """Registry-row metrics per asset, model next to the rule baseline."""
+    cols = ("n", "n_pos", "roc_auc", "pr_auc", "brier", "brier_calibrated", "precision_at_50", "recall_at_50")
+    header = ["asset", *cols, "baseline_roc_auc"]
+    lines = ["registry metrics (out-of-fold, source != unlabeled)", " | ".join(header)]
+
+    def fmt(v: object) -> str:
+        return f"{v:.3f}" if isinstance(v, float) else ("-" if v is None else str(v))
+
+    for asset, m in metrics.items():
+        reg = m["registry"]
+        row = [asset, *(fmt(reg.get(c)) for c in cols), fmt(m["baseline"]["registry"].get("roc_auc"))]
+        lines.append(" | ".join(row))
+    return "\n".join(lines)
 
 
 @app.command()
