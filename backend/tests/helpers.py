@@ -20,3 +20,110 @@ def pick(truth: dict, *, always_active: bool = True, **assets: bool) -> int:
     if always_active and matches[0][0]:
         raise LookupError(f"no always-active synth meter with {assets}")
     return matches[0][1]
+
+
+# --------------------------------------------------------------------------- synth -> pipeline frames
+
+
+def meter_year(synth_dir, meter_id: int, year: int, cfg=None):
+    """MeterYear of one synth meter, with calendar and weather columns, like the features stage builds."""
+    from osnova.config import FeatureConfig
+    from osnova.features.base import make_meter_year
+    from osnova.synth.loader import load_synth_meter, load_synth_weather
+
+    lg = load_synth_meter(synth_dir, meter_id, year)
+    return make_meter_year(lg, load_synth_weather(synth_dir, str(lg["plz"][0])), cfg or FeatureConfig())
+
+
+def synth_gp_nr(truth: dict, meter_id: int) -> str:
+    """gp_nr string of a synth meter; unlabeled meters get a fake 9xxxxx building id."""
+    gp = truth["meters"][str(meter_id)]["gp_nr"]
+    return str(gp) if gp is not None else f"9{meter_id:05d}"
+
+
+def write_synth_by_file(synth_dir, store, truth: dict, years=(2023, 2024)) -> dict[int, str]:
+    """Write the synth lastgang in the feature_pipeline by_file layout (one Parquet per source file).
+
+    Columns: gp_nr (str), ts (Datetime us, local naive, interval start), power_kw (f64, net,
+    negative = export), plz (str), num_mp_with_data (u32). Returns {meter_id: gp_nr}.
+    """
+    import polars as pl
+
+    from osnova.io.lastgang import by_file_dir
+    from osnova.synth.generate import EXPORT_OBIS, IMPORT_OBIS, SLOT_COLUMNS
+
+    gp_of = {int(m): synth_gp_nr(truth, int(m)) for m in truth["meters"]}
+    idx = {s: i for i, s in enumerate(SLOT_COLUMNS)}
+    out_dir = by_file_dir(store)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for year in years:
+        for f in sorted((synth_dir / "aew-data" / "lastgang" / str(year)).rglob("*.csv")):
+            wide = pl.read_csv(
+                f,
+                separator=";",
+                truncate_ragged_lines=True,
+                schema_overrides={
+                    "MP ID": pl.Int64,
+                    "PLZ": pl.String,
+                    **{s: pl.Float32 for s in SLOT_COLUMNS},
+                },
+            ).select(["MP ID", "OBIS-Code", "Datum", "PLZ", *SLOT_COLUMNS])
+            long = (
+                wide.unpivot(
+                    index=["MP ID", "OBIS-Code", "Datum", "PLZ"], on=SLOT_COLUMNS, variable_name="slot"
+                )
+                .with_columns(
+                    ts=pl.col("Datum").str.to_date("%d.%m.%Y").cast(pl.Datetime("us"))
+                    + pl.duration(minutes=pl.col("slot").replace_strict(idx, return_dtype=pl.Int32) * 15),
+                    signed=pl.when(pl.col("OBIS-Code") == IMPORT_OBIS)
+                    .then(pl.col("value"))
+                    .when(pl.col("OBIS-Code") == EXPORT_OBIS)
+                    .then(-pl.col("value"))
+                    .otherwise(None)
+                    * 4.0,
+                )
+                .group_by(["MP ID", "ts"])
+                .agg(power_kw=pl.col("signed").sum().cast(pl.Float64), plz=pl.col("PLZ").first())
+                .with_columns(
+                    gp_nr=pl.col("MP ID").replace_strict(gp_of, return_dtype=pl.String),
+                    num_mp_with_data=pl.lit(1, dtype=pl.UInt32),
+                )
+                .select(["gp_nr", "ts", "power_kw", "plz", "num_mp_with_data"])
+                .sort(["gp_nr", "ts"])
+            )
+            long.write_parquet(out_dir / f"{f.stem}.parquet")
+    return gp_of
+
+
+def write_synth_feature_dataset(store, truth: dict) -> None:
+    """feature_dataset.parquet with the label columns the exporter reads (1/0 labeled, null unlabeled)."""
+    import polars as pl
+
+    from osnova.io.lastgang import feature_dataset_path
+
+    rows = []
+    for m, t in truth["meters"].items():
+        lab = t["labeled"]
+        rows.append(
+            {
+                "gp_nr": synth_gp_nr(truth, int(m)),
+                "plz": t["plz"],
+                "label_pv": int(t["pv"]) if lab else None,
+                "label_ev": int(t["ev"]) if lab else None,
+                "label_heatpump": int(t["heat_pump"]) if lab else None,
+                "label_battery": int(t["battery"]) if lab else None,
+            }
+        )
+    path = feature_dataset_path(store)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame(rows).cast(
+        {c: pl.Int8 for c in ("label_pv", "label_ev", "label_heatpump", "label_battery")}
+    ).write_parquet(path)
+
+
+def write_synth_weather(synth_dir, store) -> None:
+    """weather/plz=XXXX.parquet for every synth PLZ, via the weather stage's normaliser."""
+    from osnova.config import Config
+    from osnova.io.weather import find_weather_files, normalize_weather_all, write_weather
+
+    write_weather(store, normalize_weather_all(find_weather_files(synth_dir / "weather"), Config()))
