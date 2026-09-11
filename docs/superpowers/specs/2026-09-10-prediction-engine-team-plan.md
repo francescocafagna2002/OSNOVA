@@ -1,11 +1,27 @@
 # Prediction Engine — Team Plan: work split, parallel execution, AI agents
 
-> Companion to [`2026-09-10-prediction-engine-design.md`](2026-09-10-prediction-engine-design.md). Read that first.
+> Companion to [`2026-09-10-prediction-engine-design.md`](2026-09-10-prediction-engine-design.md). Read that first, starting with its **Revision 2026-09-11** section.
+> **Revised 2026-09-11:** the four streams of §1/§3 are replaced by the four sessions in §1; cards A2, A3 and B1–B6 are done by `feature_pipeline`. The agent rules (§6) and the card format (§7) are unchanged.
 > Audience: the 2–3 people on backend/ML and every Claude Code session working on `backend/`.
 
-## 1. Principle: contracts first, then four independent streams
+## 1. Principle: contracts first, then independent sessions
 
-The design has eight file contracts (Parquet/JSON schemas in §3 of the design). Once those exist as code — Pydantic/polars schemas plus a synthetic data generator that produces them — four people (or four agents) can work without waiting for each other, because every stream's input can be generated locally and every stream's output has a schema test.
+The design has file contracts (Parquet/JSON schemas in §3 of the design). Once those exist as code — Pydantic/polars schemas plus a synthetic data generator that produces them — several people (or agents) can work without waiting for each other, because every session's input can be generated locally and every session's output has a schema test.
+
+### The four sessions (2026-09-11)
+
+The grain is one row per building (`gp_nr`, whole history); the FE id is `f"AG-{gp_nr}"`. T0 is merged. `backend/feature_pipeline/` is the ingest + feature engine and replaces Streams A (except `check-data`, `weather`) and B.
+
+| Session | Owner | Branch | Scope | Hands over |
+| --- | --- | --- | --- | --- |
+| 1 — feature_pipeline | the person with the Renku session open | `feat/backend-feature-pipeline` | cohort filter (labeled `gp_nr` + 300 random), OBIS pivot to `import_kw`/`export_kw`/`net_kw`, unit factor 4, `n_valid_days`, full Renku run | `$OSNOVA_STORE_DIR/osnova/feature_output/feature_dataset.parquet` + `intermediate/by_file/`; manifest and `audit_report.json` posted in chat |
+| 2 — labels + models | the ML person | `feat/be-models` | `src/osnova/labels/`, `src/osnova/models/`: three-valued labels keyed by `gp_nr` (design §3.7 revised), LightGBM per asset, calibration, SHAP, reasons, `osnova train` | `predictions.parquet` (one row per `gp_nr`), `models/`; owns the `PREDICTIONS`/`LABELS` schema commit |
+| 3 — events + export | the person closest to the frontend | `feat/be-events` | `src/osnova/events/`, `src/osnova/export/`, `src/osnova/api/`: detectors on the building series, showcase day, `buildings.json` with `history: []` and `groundTruth` from labels, FE glue PR | `events.parquet`, `showcase.parquet`, `export/buildings.json`; owns the `EVENTS`/`SHOWCASE` schema commit |
+| 4 — docs, contract, integration | Steven | `chore/gp-grain` | this revision, `contract: feature keys are gp_nr` (`FEATURE_KEYS` = `gp_nr, plz, n_valid_days`), retired `registry`/`ingest`/`features` stubs, `backend/CLAUDE.md`, the Phase 4 integration run | merged docs; the integration checklist |
+
+Sessions 2 and 3 develop on synth features until Session 1's Renku run lands; the integration run is Session 4's.
+
+*Original 2026-09-10 text:*
 
 ```
 T0  Skeleton + contracts + synth        (one person + one agent, ~2–3 h, blocks everything)
@@ -18,7 +34,7 @@ T0  Skeleton + contracts + synth        (one person + one agent, ~2–3 h, block
 T2  Integration run on Renku, curate featured 10, copy JSON to FE, presentation
 ```
 
-Nobody touches another stream's directory without a message. Shared files (`config.py`, `io/store.py`, `features/base.py`, `export/schema.py`) are owned by T0 and changed only via small PRs that the owner reviews within the hour.
+Nobody touches another session's directory without a message. Shared files (`config.py`, `io/store.py`, `features/base.py`, `export/schema.py`) are owned by Session 4 (was T0) and changed only via small PRs that the owner reviews within the hour.
 
 ## 2. T0 — skeleton (do this first, together)
 
@@ -36,7 +52,9 @@ Owner: Steven + one Claude Code session. Output is a PR to `main` that everyone 
 
 Definition of done: `uv sync && uv run osnova synth --out /tmp/s && uv run pytest` green on a laptop; PR merged.
 
-## 3. Streams
+## 3. Streams (2026-09-10; superseded by the sessions in §1)
+
+> **Revised 2026-09-11.** Stream A's `registry` and `ingest` and all of Stream B are done by `feature_pipeline` (Session 1). Stream C is Session 3 and Stream D is Session 2, both keyed by `gp_nr` (no `meter_id`, no `year`). The text below is kept for the ordering advice and the risk notes.
 
 Each stream has an owner, a directory, an input it can generate, an output schema, and a set of task cards (§7). Streams are ordered by risk inside themselves: do the item that can fail on real data first.
 
@@ -53,6 +71,8 @@ Owner: the person with the Renku session open. This is the only stream that sees
 Risks: file encodings, `Datum` format, DST cells, memory on the full scan (use `sink_parquet`, never `collect()` on the cohort). If Renku RAM is tight, run ingest per year.
 
 ### Stream B — Features (`features/`, `cli features`)
+
+> **Done by `feature_pipeline`** (`features.py`, `sessions.py`, `pipeline.py`); nothing to build here. `features/base.py` stays as a helper.
 
 Owner: the ML-minded person. Inputs: `MeterYear` frames from synth. Outputs: `features.parquet`.
 
@@ -92,7 +112,7 @@ Cut list if late, in order: FastAPI → battery second stage (use single stage) 
 
 ## 5. Git and environment workflow
 
-- Branch per stream: `feat/be-data`, `feat/be-features`, `feat/be-events`, `feat/be-models`. Rebase on `main` at least twice a day; PRs are small and merged by the owner after CI is green, no waiting for a second reviewer during the hackathon unless a shared file changed.
+- Branch per session (2026-09-11): `feat/backend-feature-pipeline`, `feat/be-models`, `feat/be-events`, `chore/gp-grain`. (2026-09-10: `feat/be-data`, `feat/be-features`, `feat/be-events`, `feat/be-models`.) Rebase on `main` at least twice a day; PRs are small and merged by the owner after CI is green, no waiting for a second reviewer during the hackathon unless a shared file changed.
 - Commit messages: `feat(backend): …`, `fix(backend): …`, `docs: …`, matching the existing log.
 - Laptop: `cd backend && uv sync && uv run osnova synth --out data/synth` (`data/*` is gitignored). All tests use synth. **No real data on laptops, ever.**
 - Renku: `git clone`, `uv sync`, export `OSNOVA_DATA_DIR=/path/to/aew-data OSNOVA_STORE_DIR=/path/to/store OSNOVA_WEATHER_DIR=…`, run stages with `uv run osnova <stage>`. Long stages under `nohup … > $OSNOVA_STORE_DIR/osnova/logs/<stage>.log &`.
@@ -152,13 +172,13 @@ Out of scope: the heating event detector (Stream C), any change to config.py def
 Done when: ruff + pytest green; `uv run osnova features --store data/synth_store` produces the new columns.
 ```
 
-Card index (owner → cards):
+Card index (owner → cards), status as of 2026-09-11:
 
-- **T0**: T0-1 pyproject/uv, T0-2 config, T0-3 store schemas, T0-4 features/base, T0-5 export/schema, T0-6 synth generator, T0-7 CLI stubs + CI, T0-8 CLAUDE.md/README.
-- **A**: A1 check-data, A2 registry, A3 ingest, A4 weather, A5 Renku full run + manifests.
-- **B**: B1 common, B2 ev features (with detector stub), B3 heatpump, B4 pv, B5 battery, B6 build.py parallel runner.
-- **C**: C1 ev_sessions detector, C2 pv_windows, C3 high_load + showcase, C4 build_json + curate, C5 FE glue PR, C6 hp_heating + battery_cycles, C7 FastAPI.
-- **D**: D1 labels (PU, commissioning), D2 train + metrics + baseline, D3 calibration, D4 SHAP + reasons, D5 battery second stage + predict latest year.
+- **T0** (merged): T0-1 pyproject/uv, T0-2 config, T0-3 store schemas, T0-4 features/base, T0-5 export/schema, T0-6 synth generator, T0-7 CLI stubs + CI, T0-8 CLAUDE.md/README.
+- **A**: A1 check-data (done), A2 registry — **done by feature_pipeline** (`mapping.py`, `labels.py`), A3 ingest — **done by feature_pipeline** (`ingest.py`), A4 weather (done), A5 Renku full run + manifests → Session 1 (`scripts/build_feature_dataset.py`).
+- **B**: B1 common, B2 ev features, B3 heatpump, B4 pv, B5 battery, B6 build.py parallel runner — **all done by feature_pipeline** (`features.py`, `sessions.py`, `pipeline.py`).
+- **C** → Session 3, grain `gp_nr`: C1 ev_sessions detector, C2 pv_windows, C3 high_load + showcase, C4 build_json + curate (`history: []`, `groundTruth` from labels), C5 FE glue PR, C6 hp_heating + battery_cycles, C7 FastAPI.
+- **D** → Session 2, grain `gp_nr`: D1 labels (three-valued flags, commissioning after 2025-07-01 excluded), D2 train + metrics + baseline, D3 calibration, D4 SHAP + reasons, D5 battery second stage + predict (one row per building, no "latest year").
 
 ## 8. Presentation checklist (so it is built, not improvised)
 
@@ -166,5 +186,5 @@ Card index (owner → cards):
 - `metrics.json` → one table: per asset ROC-AUC / PR-AUC on registry-only holdout, model vs rule baseline.
 - One SHAP summary plot per asset (from `explain.py`, saved to `store/osnova/models/plots/`).
 - Two featured buildings walked through in the FE: one EV+PV, one heat pump.
-- Change-over-time: one building whose `history` shows PV probability jumping in the commissioning year.
+- ~~Change-over-time: one building whose `history` shows PV probability jumping in the commissioning year.~~ Dropped 2026-09-11 (`history` is empty). Show instead one building with a late commissioning date that was excluded from the positives and what the model says about it.
 - Limitations slide = design §8.
