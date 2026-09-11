@@ -21,9 +21,14 @@ def test_synth_command_writes_truth(tmp_path: Path):
     assert (tmp_path / "truth.json").exists()
 
 
-def test_stub_exits_with_session_hint():
-    r = runner.invoke(app, ["events"])
-    assert r.exit_code == 2 and "Session 3" in r.output
+def test_events_without_building_series_fails_loudly(tmp_path: Path):
+    r = runner.invoke(app, ["events"], env={"OSNOVA_STORE_DIR": str(tmp_path / "store")})
+    assert r.exit_code == 1 and "feature_output/intermediate/by_file" in r.output
+
+
+def test_export_without_predictions_fails_loudly(tmp_path: Path):
+    r = runner.invoke(app, ["export"], env={"OSNOVA_STORE_DIR": str(tmp_path / "store")})
+    assert r.exit_code == 1 and "predictions.parquet" in r.output
 
 
 @pytest.mark.parametrize("stage", ["registry", "ingest", "features"])

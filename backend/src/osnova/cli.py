@@ -163,8 +163,22 @@ def features() -> None:
 
 @app.command()
 def events(config: Path | None = ConfigOpt, workers: int = 4) -> None:
-    """Building series (feature_output/intermediate) -> events.parquet + showcase.parquet."""
-    _stub("Session 3", "C3")
+    """by_file building series -> events.parquet + showcase.parquet."""
+    from osnova.events.run import run_events
+    from osnova.io.lastgang import by_file_dir, by_file_paths
+    from osnova.io.store import Store
+
+    settings, cfg = _ctx(config)
+    store = Store(settings)
+    if not by_file_paths(store):
+        typer.echo(
+            f"no building series under {by_file_dir(store)}; run feature_pipeline ingest first", err=True
+        )
+        raise typer.Exit(code=1)
+    ev, sc = run_events(store, cfg, workers=workers)
+    by_type = dict(ev.group_by("type").len().sort("type").iter_rows()) if ev.height else {}
+    typer.echo(f"{sc.height} buildings, {ev.height} events {by_type}")
+    typer.echo(f"wrote {store.events_path()} and {store.showcase_path()}")
 
 
 @app.command()
@@ -246,15 +260,84 @@ def _metrics_table(metrics: dict) -> str:
 
 
 @app.command()
-def export(config: Path | None = ConfigOpt, featured: int = 10, others: int = 200) -> None:
-    """Everything -> export/buildings.json (id = AG-{gp_nr})."""
-    _stub("Session 3", "C4")
+def export(
+    config: Path | None = ConfigOpt,
+    featured: int = 10,
+    others: int = 200,
+    min_types: int = typer.Option(
+        3, "--min-types", help="featured: distinct event types on the showcase day"
+    ),
+    min_plz: int = typer.Option(5, "--min-plz", help="featured: warn when spread over fewer PLZ"),
+    recurate: bool = typer.Option(False, "--recurate", help="ignore export/featured.json and pick again"),
+) -> None:
+    """predictions + showcase + events + building series -> export/buildings.json (+ featured.json)."""
+    import time
+
+    import polars as pl
+
+    from osnova.export.build_json import build_buildings, load_featured, load_labels, write_buildings
+    from osnova.export.curate import pick_featured, pick_others
+    from osnova.io.lastgang import list_buildings
+    from osnova.io.store import Store
+
+    settings, cfg = _ctx(config)
+    store = Store(settings)
+    missing = [
+        p for p in (store.predictions_path(), store.showcase_path(), store.events_path()) if not p.exists()
+    ]
+    if missing:
+        typer.echo(
+            f"missing inputs: {', '.join(map(str, missing))} (run `osnova train` / `osnova events`)", err=True
+        )
+        raise typer.Exit(code=1)
+    t0 = time.perf_counter()
+    pinned = None if recurate else load_featured(store)
+    if pinned is not None:
+        featured_ids, other_ids = pinned
+        typer.echo(f"reusing {store.featured_json()}")
+    else:
+        labels = load_labels(store)
+        featured_ids = pick_featured(
+            labels if labels is not None else pl.DataFrame({"gp_nr": []}, schema={"gp_nr": pl.String}),
+            pl.read_parquet(store.predictions_path()),
+            pl.read_parquet(store.showcase_path()),
+            n=featured,
+            min_types=min_types,
+            min_plz=min_plz,
+        )
+        other_ids = pick_others(list_buildings(store), featured_ids, n=others, seed=cfg.cohort.seed)
+    buildings = build_buildings(store, cfg, featured_ids, other_ids)
+    path = write_buildings(store, buildings)
+    n_featured = sum(b.featured for b in buildings)
+    store.write_manifest(
+        "export",
+        config=cfg.model_dump(),
+        inputs={
+            "predictions": store.predictions_path(),
+            "showcase": store.showcase_path(),
+            "events": store.events_path(),
+            "registry": store.registry_path(),
+        },
+        output=path,
+        n_buildings=len(buildings),
+        n_featured=n_featured,
+        featured=featured_ids,
+        duration_s=round(time.perf_counter() - t0, 1),
+    )
+    typer.echo(f"featured: {', '.join(map(str, featured_ids)) or '(none)'}")
+    typer.echo(f"wrote {len(buildings)} buildings ({n_featured} featured) to {path}")
 
 
 @app.command()
 def api(host: str = "127.0.0.1", port: int = 8000) -> None:
-    """Serve the exported JSON over HTTP."""
-    _stub("Session 3", "C7")
+    """Serve export/buildings.json and per-date profiles over HTTP (GET /health, /buildings, ...)."""
+    import uvicorn
+
+    from osnova.api.app import create_app
+    from osnova.io.store import Store
+
+    settings, _ = _ctx(None)
+    uvicorn.run(create_app(Store(settings)), host=host, port=port)
 
 
 if __name__ == "__main__":
