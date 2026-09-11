@@ -163,8 +163,16 @@ def features() -> None:
 
 @app.command()
 def events(config: Path | None = ConfigOpt, workers: int = 4) -> None:
-    """Building series (feature_output/intermediate) -> events.parquet + showcase.parquet."""
-    _stub("Session 3", "C3")
+    """by_file building series -> events.parquet + showcase.parquet."""
+    from osnova.events.run import run_events
+    from osnova.io.store import Store
+
+    settings, cfg = _ctx(config)
+    store = Store(settings)
+    ev, sc = run_events(store, cfg, workers=workers)
+    by_type = dict(ev.group_by("type").len().sort("type").iter_rows()) if ev.height else {}
+    typer.echo(f"{sc.height} buildings, {ev.height} events {by_type}")
+    typer.echo(f"wrote {store.events_path()} and {store.showcase_path()}")
 
 
 @app.command()
