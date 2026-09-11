@@ -8,8 +8,12 @@ here — see ``backend/feature_pipeline/README.md`` for the scope of this task.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import subprocess
 import time
+from dataclasses import asdict
 
 import polars as pl
 
@@ -21,10 +25,19 @@ from feature_pipeline.features import (
     main_feature_exprs,
     prepare_frame,
 )
-from feature_pipeline.ingest import discover_consumption_files, run_ingest, scan_building_consumption
+from feature_pipeline.ingest import (
+    discover_consumption_files,
+    run_ingest,
+    scan_building_consumption,
+    select_cohort,
+)
 from feature_pipeline.labels import load_labels
 from feature_pipeline.mapping import load_mapping
-from feature_pipeline.sessions import add_session_run_columns, aggregate_sessions_to_building, build_session_table
+from feature_pipeline.sessions import (
+    add_session_run_columns,
+    aggregate_sessions_to_building,
+    build_session_table,
+)
 from feature_pipeline.weather import load_weather
 
 logger = logging.getLogger(__name__)
@@ -35,6 +48,7 @@ FINAL_COLUMNS = [
     "gp_nr",
     "plz",
     "num_mp_ids",
+    "n_valid_days",
     # Battery
     "pv_presence",
     "near_zero_interval_ratio",
@@ -125,16 +139,26 @@ def run_pipeline(
 
     mp_to_building = mapping.mp_to_building
     building_mp_counts = mapping.building_mp_counts
-    if limit_buildings is not None:
-        sampled = (
-            building_mp_counts.sort("gp_nr").head(limit_buildings).get_column("gp_nr").to_list()
-        )
-        mp_to_building = mp_to_building.filter(pl.col("gp_nr").is_in(sampled))
-        building_mp_counts = building_mp_counts.filter(pl.col("gp_nr").is_in(sampled))
-        logger.info("Dev run: limited to %d buildings", len(sampled))
-
-    logger.info("Loading device labels")
+    logger.info("Loading device labels and selecting cohort")
     labels = load_labels(cfg.paths)
+    cohort = select_cohort(mapping.cohort_mapping, labels, cfg.cohort)
+    if limit_buildings is not None:
+        if limit_buildings < 1:
+            raise ValueError("limit_buildings must be positive")
+        cohort = cohort.head(limit_buildings)
+    if cohort.is_empty():
+        raise ValueError("Selected cohort is empty")
+    if not cohort["gp_nr"].is_between(100000, 999999).all():
+        raise ValueError("Building contract requires six-digit numeric GP identifiers")
+    cfg.paths.output_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = cfg.paths.output_dir / "_manifest.json"
+    manifest_path.unlink(missing_ok=True)
+    cohort.write_parquet(cfg.paths.output_dir / "cohort.parquet")
+    logger.info(
+        "Cohort: %d labeled + %d extra GPs",
+        cohort["is_labeled"].sum(),
+        cohort.filter(~pl.col("is_labeled")).height,
+    )
 
     logger.info("Loading weather")
     weather = load_weather(cfg.paths, cfg.thresholds)
@@ -143,17 +167,20 @@ def run_pipeline(
     report.number_of_consumption_files = len(discover_consumption_files(cfg.paths))
     logger.info("Ingesting raw consumption (%d files discovered)", report.number_of_consumption_files)
     ingest_audit = run_ingest(
-        cfg.paths, cfg.thresholds, mp_to_building, limit_files=limit_files, resume=resume
+        cfg.paths, cfg.thresholds, mp_to_building, limit_files=limit_files, resume=resume, cohort=cohort
     )
     report.number_of_files_processed_this_run = ingest_audit.files_processed_this_run
     report.number_of_files_skipped_cached = ingest_audit.files_skipped_cached
     report.number_of_files_failed = len(ingest_audit.files_failed)
     report.failed_files = list(ingest_audit.files_failed)
+    report.rows_per_part = ingest_audit.rows_per_part
+    report.ignored_obis_rows = dict(ingest_audit.ignored_obis_rows)
+    report.number_of_ignored_obis_rows = sum(ingest_audit.ignored_obis_rows.values())
     report.number_of_mapped_mp_ids = len(ingest_audit.mapped_mp_ids_seen)
     report.number_of_unmapped_mp_ids = len(ingest_audit.unmapped_mp_ids)
     report.sample_unmapped_mp_ids = sorted(ingest_audit.unmapped_mp_ids)[:20]
 
-    base = scan_building_consumption(cfg.paths)
+    base = scan_building_consumption(cfg.paths, ingest_audit.parts)
     prepared = prepare_frame(base, weather, cfg)
 
     logger.info("Computing per-building features")
@@ -177,23 +204,25 @@ def run_pipeline(
     session_features = aggregate_sessions_to_building(sessions_table.lazy(), coverage, cfg).collect()
 
     # --- assemble one row per building ---
-    plz_lookup = (
-        base.select("gp_nr", "plz").unique(subset=["gp_nr"], keep="first").collect()
+    plz_lookup = base.group_by("gp_nr").agg(pl.col("plz").drop_nulls().mode().sort().first()).collect()
+    cohort = (
+        cohort.rename({"plz": "_registry_plz"})
+        .join(plz_lookup, on="gp_nr", how="left")
+        .with_columns(pl.coalesce("plz", "_registry_plz").cast(pl.String).alias("plz"))
+        .select("gp_nr", "is_labeled", "plz")
     )
+    cohort.write_parquet(cfg.paths.output_dir / "cohort.parquet")
 
     feature_df = (
-        main_df.drop("_n_rows_total", "min_ts", "max_ts")
+        cohort.join(main_df.drop("_n_rows_total", "min_ts", "max_ts"), on="gp_nr", how="left")
         .join(day_export, on="gp_nr", how="left")
         .join(session_features, on="gp_nr", how="left")
-        .join(plz_lookup, on="gp_nr", how="left")
         .join(building_mp_counts, on="gp_nr", how="left")
-        .join(labels, on="gp_nr", how="left")
+        .join(labels.drop("plz"), on="gp_nr", how="left")
     )
 
     report.number_of_processed_buildings = feature_df.height
-    report.number_of_multi_mp_buildings = (
-        feature_df.filter(pl.col("num_mp_ids") > 1).height
-    )
+    report.number_of_multi_mp_buildings = feature_df.filter(pl.col("num_mp_ids") > 1).height
     building_plz = feature_df.get_column("plz").drop_nulls().unique().to_list()
     report.number_of_building_plz = len(building_plz)
     report.number_of_building_plz_without_weather = sum(
@@ -204,6 +233,8 @@ def run_pipeline(
     # for every session_* column; session_count and sessions_per_week have a
     # well-defined zero, the power/timing stats stay null (no data, not 0).
     feature_df = feature_df.with_columns(
+        pl.col("num_mp_ids").fill_null(0).cast(pl.Int32),
+        pl.col("n_valid_days").fill_null(0).cast(pl.Int32),
         pl.col("session_count").fill_null(0),
         pl.col("sessions_per_week").fill_null(0.0),
     )
@@ -212,7 +243,12 @@ def run_pipeline(
     if missing_cols:
         raise RuntimeError(f"Feature dataset is missing expected columns: {missing_cols}")
 
-    feature_df = feature_df.select(FINAL_COLUMNS)
+    keys = {"gp_nr": pl.Int64, "plz": pl.String, "num_mp_ids": pl.Int32, "n_valid_days": pl.Int32}
+    output_schema = {
+        name: keys.get(name, pl.Int8 if name.startswith("label_") else pl.Float64) for name in FINAL_COLUMNS
+    }
+    feature_df = feature_df.select(FINAL_COLUMNS).cast(output_schema).sort("gp_nr")
+    report.feature_table_shape = list(feature_df.shape)
 
     cfg.paths.output_dir.mkdir(parents=True, exist_ok=True)
     feature_df.write_parquet(cfg.paths.feature_dataset_path)
@@ -221,6 +257,30 @@ def run_pipeline(
     report.processing_time_seconds = time.monotonic() - start
 
     write_audit_report(cfg.paths.audit_path, report)
+    config = asdict(cfg)
+    config_hash = hashlib.sha256(json.dumps(config, sort_keys=True, default=str).encode()).hexdigest()
+    try:
+        revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        revision = None
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "git_sha": revision,
+                "config_hash": config_hash,
+                "config": config,
+                "inputs": asdict(cfg.paths),
+                "rows": feature_df.height,
+                "duration_s": report.processing_time_seconds,
+                "consumption_parts": [str(part) for part in ingest_audit.parts],
+                "rows_per_part": report.rows_per_part,
+                "feature_table_shape": report.feature_table_shape,
+                "scope": "limited_files" if limit_files is not None else "all_discovered_files",
+            },
+            indent=2,
+            default=str,
+        )
+    )
     print_audit_report(report)
 
     return report

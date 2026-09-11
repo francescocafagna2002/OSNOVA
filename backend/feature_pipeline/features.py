@@ -1,8 +1,7 @@
 """Battery / PV / EV / heat-pump feature expressions.
-
-These functions only *measure* characteristics of a building's timeline —
-none of them decide "this building has a PV/EV/battery/heat pump". That
-judgement is left to a future ML model, per the brief.
+        pl.when(pl.col("export_kw").count() > 0)
+        .then(pl.col("export_kw").sum() * (th.interval_minutes / 60.0))
+        .otherwise(None).alias("total_export_kwh"),
 
 Everything here is a `polars` expression evaluated inside one
 ``group_by("gp_nr").agg([...])`` (see ``pipeline.py``), so it is vectorised
@@ -34,11 +33,7 @@ def _safe_ratio(numerator: pl.Expr, denominator: pl.Expr) -> pl.Expr:
 
 def _corr_with_min_obs(a: pl.Expr, b: pl.Expr, cond: pl.Expr, min_obs: int) -> pl.Expr:
     n = cond.sum()
-    return (
-        pl.when(n >= min_obs)
-        .then(pl.corr(a.filter(cond), b.filter(cond)))
-        .otherwise(None)
-    )
+    return pl.when(n >= min_obs).then(pl.corr(a.filter(cond), b.filter(cond))).otherwise(None)
 
 
 def prepare_frame(lf: pl.LazyFrame, weather: WeatherData, cfg: PipelineConfig) -> pl.LazyFrame:
@@ -52,10 +47,10 @@ def prepare_frame(lf: pl.LazyFrame, weather: WeatherData, cfg: PipelineConfig) -
     lf = lf.sort(["gp_nr", "ts"])
     lf = add_calendar_columns(lf, "ts")
 
+    lf = lf.join(weather.hourly.lazy(), left_on=["plz", "_ts_hour"], right_on=["plz", "ts"], how="left")
     lf = lf.join(
-        weather.hourly.lazy(), left_on=["plz", "_ts_hour"], right_on=["plz", "ts"], how="left"
+        weather.daily_sun_class.lazy(), left_on=["plz", "_date"], right_on=["plz", "_date"], how="left"
     )
-    lf = lf.join(weather.daily_sun_class.lazy(), left_on=["plz", "_date"], right_on=["plz", "_date"], how="left")
     lf = lf.with_columns(
         pl.col("is_sunny_day").fill_null(False),
         pl.col("is_cloudy_day").fill_null(False),
@@ -87,7 +82,7 @@ def prepare_frame(lf: pl.LazyFrame, weather: WeatherData, cfg: PipelineConfig) -
 
     # --- ramps: only across exactly-15-minute gaps, never across a missing
     # interval ---
-    gap_ok = (pl.col("ts").diff().over("gp_nr") == pl.duration(minutes=th.interval_minutes))
+    gap_ok = pl.col("ts").diff().over("gp_nr") == pl.duration(minutes=th.interval_minutes)
     lf = lf.with_columns(
         pl.when(gap_ok).then(pl.col("power_kw").diff().over("gp_nr")).otherwise(None).alias("ramp")
     )
@@ -133,23 +128,24 @@ def main_feature_exprs(cfg: PipelineConfig) -> list[pl.Expr]:
         pl.col("power_kw").filter(pl.col("is_midday")).mean().alias("daytime_mean_power"),
         pl.col("power_kw").filter(pl.col("is_morning")).mean().alias("morning_mean_power"),
         pl.col("power_kw").filter(pl.col("is_evening")).mean().alias("evening_mean_power"),
-        _safe_ratio(
-            (pl.col("power_kw") < -th.export_epsilon_kw).sum(), valid.sum()
-        ).alias("negative_consumption_ratio"),
+        _safe_ratio((pl.col("power_kw") < -th.export_epsilon_kw).sum(), valid.sum()).alias(
+            "negative_consumption_ratio"
+        ),
         _safe_ratio(
             ((pl.col("power_kw") < -th.export_epsilon_kw) & pl.col("is_midday")).sum(),
             (valid & pl.col("is_midday")).sum(),
         ).alias("negative_daytime_consumption_ratio"),
-        (
-            (-pl.col("power_kw")).filter(pl.col("power_kw") < 0).sum()
-            * (th.interval_minutes / 60.0)
-        ).alias("total_export_kwh"),
-        pl.col("power_kw").filter(pl.col("is_midday") & pl.col("is_summer")).mean().alias(
-            "summer_midday_mean"
+        ((-pl.col("power_kw")).filter(pl.col("power_kw") < 0).sum() * (th.interval_minutes / 60.0)).alias(
+            "total_export_kwh"
         ),
-        pl.col("power_kw").filter(pl.col("is_midday") & pl.col("is_winter")).mean().alias(
-            "winter_midday_mean"
-        ),
+        pl.col("power_kw")
+        .filter(pl.col("is_midday") & pl.col("is_summer"))
+        .mean()
+        .alias("summer_midday_mean"),
+        pl.col("power_kw")
+        .filter(pl.col("is_midday") & pl.col("is_winter"))
+        .mean()
+        .alias("winter_midday_mean"),
         _corr_with_min_obs(
             pl.col("power_kw"),
             pl.col("shortwave_radiation"),
@@ -220,12 +216,14 @@ def main_feature_exprs(cfg: PipelineConfig) -> list[pl.Expr]:
             .alias(f"mean_consumption_T_{tb.name}")
         )
     exprs += [
-        pl.col("power_kw").filter(pl.col("is_winter") & pl.col("is_night")).mean().alias(
-            "winter_night_mean_consumption"
-        ),
-        pl.col("power_kw").filter(pl.col("is_summer") & pl.col("is_night")).mean().alias(
-            "summer_night_mean_consumption"
-        ),
+        pl.col("power_kw")
+        .filter(pl.col("is_winter") & pl.col("is_night"))
+        .mean()
+        .alias("winter_night_mean_consumption"),
+        pl.col("power_kw")
+        .filter(pl.col("is_summer") & pl.col("is_night"))
+        .mean()
+        .alias("summer_night_mean_consumption"),
     ]
 
     return exprs
@@ -240,12 +238,12 @@ def day_level_export_ratio(lf: pl.LazyFrame, cfg: PipelineConfig) -> pl.LazyFram
     th = cfg.thresholds
     per_day = lf.group_by(["gp_nr", "_date"]).agg(
         pl.col("power_kw").is_not_null().any().alias("_has_valid"),
+        pl.col("power_kw").count().alias("_valid_count"),
         (pl.col("power_kw") < -th.export_epsilon_kw).fill_null(False).any().alias("_has_export"),
     )
     return per_day.group_by("gp_nr").agg(
-        _safe_ratio(pl.col("_has_export").sum(), pl.col("_has_valid").sum()).alias(
-            "days_with_export_ratio"
-        )
+        (pl.col("_valid_count") >= th.min_valid_intervals_per_day).sum().alias("n_valid_days"),
+        _safe_ratio(pl.col("_has_export").sum(), pl.col("_has_valid").sum()).alias("days_with_export_ratio"),
     )
 
 
@@ -256,7 +254,5 @@ def finalize_pv_diff(df: pl.DataFrame) -> pl.DataFrame:
     (aggregation expressions cannot reference each other's results).
     """
     return df.with_columns(
-        (pl.col("winter_midday_mean") - pl.col("summer_midday_mean")).alias(
-            "summer_vs_winter_midday_diff"
-        )
+        (pl.col("winter_midday_mean") - pl.col("summer_midday_mean")).alias("summer_vs_winter_midday_diff")
     )

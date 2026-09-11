@@ -46,21 +46,25 @@ def _aggregate_flag(flag_col: str) -> pl.Expr:
     # ignored already implements "any 1 wins"; we only need to special-case
     # "all null" (no information at all) vs "all-null-or-zero" (confirmed 0).
     has_any_info = pl.col(flag_col).is_not_null().any()
-    return (
-        pl.when(~has_any_info)
-        .then(pl.lit(None, dtype=pl.Int8))
-        .otherwise(pl.col(flag_col).max())
-    )
+    return pl.when(~has_any_info).then(pl.lit(None, dtype=pl.Int8)).otherwise(pl.col(flag_col).max())
 
 
 def load_labels(paths: PathsConfig) -> pl.DataFrame:
-    raw = read_csv_flexible(paths.labels_file)
+    raw = read_csv_flexible(paths.labels_file, infer_schema_length=0)
 
     gp_col = find_column(raw.columns, "GP-Nr", "GPNr", "GP Nr")
     if gp_col is None:
         raise ValueError(f"GIGI labels file: expected a 'GP-Nr' column, found {raw.columns!r}")
 
-    select_exprs = [pl.col(gp_col).cast(pl.Utf8).str.strip_chars().alias("gp_nr")]
+    select_exprs = [
+        pl.col(gp_col).cast(pl.Utf8).str.strip_chars().cast(pl.Int64, strict=False).alias("gp_nr")
+    ]
+    plz_col = find_column(raw.columns, "PLZ")
+    select_exprs.append(
+        (
+            pl.col(plz_col).str.strip_chars().replace("", None) if plz_col else pl.lit(None, dtype=pl.String)
+        ).alias("plz")
+    )
     present_flag_cols: list[str] = []
     for label_col, candidates in _LABEL_COLUMNS.items():
         src = find_column(raw.columns, *candidates)
@@ -72,8 +76,9 @@ def load_labels(paths: PathsConfig) -> pl.DataFrame:
         select_exprs.append(_mark_to_flag(src).alias(label_col))
         present_flag_cols.append(label_col)
 
-    per_row = raw.select(select_exprs)
+    per_row = raw.select(select_exprs).drop_nulls("gp_nr")
 
     agg_exprs = [_aggregate_flag(c).alias(c) for c in _LABEL_COLUMNS]
+    agg_exprs.append(pl.col("plz").drop_nulls().sort().first())
     labels = per_row.group_by("gp_nr").agg(agg_exprs)
     return labels

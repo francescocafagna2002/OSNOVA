@@ -44,8 +44,7 @@ def build_session_table(lf_with_runs: pl.LazyFrame, cfg: PipelineConfig) -> pl.L
     """One row per qualifying session: start/end/duration/power stats/energy."""
     th = cfg.thresholds
     qualifying = lf_with_runs.filter(
-        pl.col("is_high_load")
-        & (pl.col(f"{_SESSION_PREFIX}_run_len") >= th.ev_min_session_intervals)
+        pl.col("is_high_load") & (pl.col(f"{_SESSION_PREFIX}_run_len") >= th.ev_min_session_intervals)
     )
     sessions = qualifying.group_by(["gp_nr", f"{_SESSION_PREFIX}_run_id"]).agg(
         pl.col("ts").min().alias("start_timestamp"),
@@ -120,14 +119,9 @@ def aggregate_sessions_to_building(
     )
 
     per_building = per_building.join(coverage_lf, on="gp_nr", how="left")
-    weeks = (
-        pl.col("max_ts") - pl.col("min_ts")
-    ).dt.total_seconds() / (7 * 24 * 3600)
+    weeks = (pl.col("max_ts") - pl.col("min_ts")).dt.total_seconds() / (7 * 24 * 3600)
     per_building = per_building.with_columns(
-        pl.when(weeks > 0)
-        .then(pl.col("session_count") / weeks)
-        .otherwise(None)
-        .alias("sessions_per_week")
+        pl.when(weeks > 0).then(pl.col("session_count") / weeks).otherwise(None).alias("sessions_per_week")
     ).drop("min_ts", "max_ts")
 
     return per_building

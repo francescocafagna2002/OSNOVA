@@ -26,7 +26,7 @@ from dataclasses import dataclass
 import polars as pl
 
 from feature_pipeline.config import PathsConfig, ThresholdsConfig
-from feature_pipeline.csv_utils import find_column, read_csv_flexible
+from feature_pipeline.csv_utils import find_column, read_csv_flexible, read_csv_header
 
 logger = logging.getLogger(__name__)
 
@@ -80,11 +80,14 @@ def load_weather(paths: PathsConfig, cfg: ThresholdsConfig) -> WeatherData:
             continue
         for pattern in paths.weather_globs:
             files.extend(root.glob(pattern))
-    files = sorted(set(files))
+    files = [
+        path
+        for path in sorted(set(files))
+        if path.is_file() and find_column(read_csv_header(path), *HOURLY_VALUE_COLUMNS) is not None
+    ]
     if not files:
         logger.warning(
-            "No weather files found under %s (globs %r). All weather-based "
-            "features will be null.",
+            "No weather files found under %s (globs %r). All weather-based features will be null.",
             search_roots,
             paths.weather_globs,
         )
@@ -172,34 +175,57 @@ def load_weather(paths: PathsConfig, cfg: ThresholdsConfig) -> WeatherData:
                 continue
             frame = frame.with_columns(pl.lit(plz).alias("plz"))
 
-        # Open-Meteo's "..._utc" columns are UTC; everything else in this
-        # pipeline (consumption timestamps, dayparts, seasons) is local
-        # Europe/Zurich naive time, so a UTC source must be converted here —
-        # otherwise every join is off by 1-2 hours (CET/CEST). Strip any
-        # trailing "Z"/offset first so this is robust whether or not the
-        # source string already carries one; the result is always treated as
-        # the UTC wall-clock reading.
         is_utc_source = "utc" in time_col.lower()
         if is_utc_source:
             ts_expr = (
-                pl.col("_time_raw")
-                .str.replace(r"Z$", "", literal=False)
-                .str.replace(r"[+-]\d{2}:?\d{2}$", "", literal=False)
-                .str.to_datetime(strict=False)
-                .dt.replace_time_zone("UTC")
-                .dt.convert_time_zone("Europe/Zurich")
-                .dt.replace_time_zone(None)
+                pl.col("_time_raw").str.to_datetime(time_zone="UTC", strict=True).dt.replace_time_zone(None)
             )
         else:
-            ts_expr = pl.col("_time_raw").str.to_datetime(strict=False, ambiguous="earliest")
+            ts_expr = pl.col("_time_raw").str.to_datetime(strict=True, ambiguous="earliest")
 
-        frame = frame.with_columns(ts_expr.alias("ts")).drop("_time_raw")
-        frames.append(frame.select("plz", "ts", *HOURLY_VALUE_COLUMNS))
+        frame = frame.with_columns(
+            ts_expr.cast(pl.Datetime("us")).alias("_order"), pl.lit(is_utc_source).alias("_utc_source")
+        )
+        frames.append(frame.select("plz", "_order", "_utc_source", *HOURLY_VALUE_COLUMNS))
 
     if not frames:
         raise ValueError(f"No usable weather files under {search_roots}")
 
-    hourly = pl.concat(frames, how="vertical_relaxed").drop_nulls(subset=["ts"])
+    raw_hourly = pl.concat(frames, how="vertical_relaxed").drop_nulls(subset=["_order"])
+    interval_vars = [column for column in cfg.weather_interval_end_vars if column in HOURLY_VALUE_COLUMNS]
+    instant = raw_hourly.with_columns(
+        [
+            pl.when(pl.col("_utc_source")).then(None).otherwise(pl.col(column)).alias(column)
+            for column in interval_vars
+        ]
+    )
+    interval = raw_hourly.filter("_utc_source").with_columns(
+        (pl.col("_order") - pl.duration(hours=1)),
+        *[
+            pl.lit(None, dtype=pl.Float64).alias(column)
+            for column in HOURLY_VALUE_COLUMNS
+            if column not in interval_vars
+        ],
+    )
+    hourly = (
+        pl.concat([instant, interval])
+        .group_by("plz", "_order", "_utc_source")
+        .agg(pl.col(HOURLY_VALUE_COLUMNS).drop_nulls().first())
+        .sort(["plz", "_order"])
+        .with_columns(
+            pl.when(pl.col("_utc_source"))
+            .then(
+                pl.col("_order")
+                .dt.replace_time_zone("UTC")
+                .dt.convert_time_zone(cfg.timezone)
+                .dt.replace_time_zone(None)
+            )
+            .otherwise(pl.col("_order"))
+            .alias("ts")
+        )
+        .unique(["plz", "ts"], keep="first", maintain_order=True)
+        .select("plz", "ts", *HOURLY_VALUE_COLUMNS)
+    )
 
     # Daily aggregate computed ONLY from the hourly frame (24 real values per
     # day), never from a 15-minute frame where each hourly value is repeated
@@ -212,7 +238,12 @@ def load_weather(paths: PathsConfig, cfg: ThresholdsConfig) -> WeatherData:
             pl.col("ts").dt.month().alias("_month"),
         )
         .group_by("plz", "_date", "_month")
-        .agg(pl.col("shortwave_radiation").sum().alias("_daily_sw"))
+        .agg(
+            pl.when(pl.col("shortwave_radiation").count() > 0)
+            .then(pl.col("shortwave_radiation").sum())
+            .otherwise(None)
+            .alias("_daily_sw")
+        )
     )
 
     monthly_bounds = daily.group_by("plz", "_month").agg(

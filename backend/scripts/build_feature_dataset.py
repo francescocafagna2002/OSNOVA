@@ -25,47 +25,73 @@ Re-running is incremental: already-ingested consumption files are skipped
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import os
+import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from feature_pipeline.config import PathsConfig, PipelineConfig, ThresholdsConfig
+from feature_pipeline.config import CohortConfig, PathsConfig, PipelineConfig, ThresholdsConfig
+from feature_pipeline.export_labels import load_gigi_dates
 from feature_pipeline.pipeline import run_pipeline
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     defaults = PathsConfig()
+    cohort_defaults = CohortConfig()
+    output_default = (
+        Path(os.environ["OSNOVA_STORE_DIR"]) / "osnova/feature_output"
+        if os.environ.get("OSNOVA_STORE_DIR")
+        else defaults.output_dir
+    )
     parser.add_argument("--raw-consumption-dir", type=Path, default=defaults.raw_consumption_dir)
     parser.add_argument("--raw-consumption-glob", default=defaults.raw_consumption_glob)
     parser.add_argument("--mp-mapping-file", type=Path, default=defaults.mp_mapping_file)
     parser.add_argument("--zaehler-gp-file", type=Path, default=defaults.zaehler_gp_file)
     parser.add_argument("--labels-file", type=Path, default=defaults.labels_file)
     parser.add_argument(
-        "--weather-dir", type=Path, nargs="+", default=[defaults.weather_dir],
+        "--weather-dir",
+        type=Path,
+        nargs="+",
+        default=[defaults.weather_dir],
         help="One or more weather root directories (e.g. both weather_part_1 "
-             "and weather_part_2 if they don't share a parent). PLZ is read "
-             "from each file's parent directory name (real layout: "
-             "<root>/hourly/<PLZ>/YYYY-MM.csv.gz).",
+        "and weather_part_2 if they don't share a parent). PLZ is read "
+        "from each file's parent directory name (real layout: "
+        "<root>/hourly/<PLZ>/YYYY-MM.csv.gz).",
     )
     parser.add_argument(
-        "--weather-glob", action="append", default=None,
+        "--weather-glob",
+        action="append",
+        default=None,
         help=f"Glob pattern for weather files under each --weather-dir root; "
-             f"repeatable. Default: {list(defaults.weather_globs)}.",
+        f"repeatable. Default: {list(defaults.weather_globs)}.",
     )
-    parser.add_argument("--output-dir", type=Path, default=defaults.output_dir)
+    parser.add_argument("--output-dir", type=Path, default=output_default)
+    parser.add_argument("--extra-random-gps", type=int, default=cohort_defaults.extra_random_gps)
+    parser.add_argument("--seed", type=int, default=cohort_defaults.seed)
+    parser.add_argument("--labeled-only", action="store_true", help="Exclude the additional random GPs")
     parser.add_argument("--intermediate-dir", type=Path, default=None)
     parser.add_argument(
-        "--limit-buildings", type=int, default=None,
+        "--limit-buildings",
+        type=int,
+        default=None,
         help="Process only the first N buildings (by GP-Nr) — fast development run.",
     )
     parser.add_argument(
-        "--limit-files", type=int, default=None,
+        "--limit-files",
+        type=int,
+        default=None,
         help="Read only the first N consumption CSVs — dev-only, not exhaustive.",
     )
-    parser.add_argument("--no-resume", action="store_true", help="Ignore the ingest checkpoint and reprocess every file.")
+    parser.add_argument(
+        "--no-resume", action="store_true", help="Ignore the ingest checkpoint and reprocess every file."
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
 
@@ -91,7 +117,13 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=args.output_dir,
         intermediate_dir=intermediate_dir,
     )
-    cfg = PipelineConfig(paths=paths, thresholds=ThresholdsConfig())
+    cfg = PipelineConfig(
+        paths=paths,
+        thresholds=ThresholdsConfig(),
+        cohort=CohortConfig(
+            labeled_only=args.labeled_only, extra_random_gps=args.extra_random_gps, seed=args.seed
+        ),
+    )
 
     for label, path in (
         ("raw consumption dir", paths.raw_consumption_dir),
@@ -103,12 +135,29 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Error: {label} not found: {path}", file=sys.stderr)
             return 1
 
-    run_pipeline(
+    report = run_pipeline(
         cfg,
         limit_buildings=args.limit_buildings,
         limit_files=args.limit_files,
         resume=not args.no_resume,
     )
+    import polars as pl
+
+    manifest_path = paths.output_dir / "_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_path.unlink()
+    dates_path = paths.output_dir / "gigi_dates.parquet"
+    cohort = pl.read_parquet(paths.output_dir / "cohort.parquet").select("gp_nr")
+    cohort.join(load_gigi_dates(paths.labels_file), on="gp_nr", how="left").write_parquet(dates_path)
+    gigi_path = paths.output_dir / "HackDays2026 - GIGI.csv"
+    if paths.labels_file.resolve() != gigi_path.resolve():
+        with paths.labels_file.open("rb") as source, gigi_path.open("wb") as destination:
+            shutil.copyfileobj(source, destination)
+    manifest.update(gigi_dates=str(dates_path), gigi_labels=str(gigi_path))
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    print(f"Feature table shape: {report.feature_table_shape}")
+    print(f"GIGI dates: {dates_path}")
+    print(f"GIGI registry copy: {gigi_path}")
     return 0
 
 

@@ -23,6 +23,10 @@ class AuditReport:
     number_of_files_skipped_cached: int = 0
     number_of_files_failed: int = 0
     failed_files: list[str] = field(default_factory=list)
+    rows_per_part: dict[str, int] = field(default_factory=dict)
+    feature_table_shape: list[int] = field(default_factory=list)
+    number_of_ignored_obis_rows: int = 0
+    ignored_obis_rows: dict[str, int] = field(default_factory=dict)
 
     number_of_mapped_mp_ids: int = 0
     number_of_unmapped_mp_ids: int = 0
@@ -67,21 +71,33 @@ def write_audit_report(path: Path, report: AuditReport) -> None:
 
 def print_audit_report(report: AuditReport) -> None:
     print("\n=== Feature extraction audit ===")
-    print(f"Consumption files:        {report.number_of_consumption_files} "
-          f"(processed this run: {report.number_of_files_processed_this_run}, "
-          f"cached/skipped: {report.number_of_files_skipped_cached}, "
-          f"failed: {report.number_of_files_failed})")
+    print(
+        f"Consumption files:        {report.number_of_consumption_files} "
+        f"(processed this run: {report.number_of_files_processed_this_run}, "
+        f"cached/skipped: {report.number_of_files_skipped_cached}, "
+        f"failed: {report.number_of_files_failed})"
+    )
     print(f"Mapped MP IDs:            {report.number_of_mapped_mp_ids}")
-    print(f"Unmapped MP IDs:          {report.number_of_unmapped_mp_ids} "
-          f"(sample: {report.sample_unmapped_mp_ids[:5]})")
-    print(f"Mapping MP IDs dropped:   {report.number_of_unresolved_mapping_mp_ids} unresolved, "
-          f"{report.number_of_ambiguous_mapping_mp_ids} ambiguous (see mapping.py)")
+    print(f"Ignored OBIS rows:        {report.number_of_ignored_obis_rows} {report.ignored_obis_rows}")
+    print(
+        f"Unmapped MP IDs:          {report.number_of_unmapped_mp_ids} "
+        f"(sample: {report.sample_unmapped_mp_ids[:5]})"
+    )
+    print(
+        f"Mapping MP IDs dropped:   {report.number_of_unresolved_mapping_mp_ids} unresolved, "
+        f"{report.number_of_ambiguous_mapping_mp_ids} ambiguous (see mapping.py)"
+    )
     print(f"Buildings in mapping:     {report.number_of_buildings_in_mapping}")
     print(f"Buildings processed:      {report.number_of_processed_buildings}")
+    print(f"Feature table shape:      {report.feature_table_shape}")
+    for part, rows in sorted(report.rows_per_part.items()):
+        print(f"Part rows:                {rows} {part}")
     print(f"Multi-MP buildings:       {report.number_of_multi_mp_buildings}")
     print(f"Weather PLZ available:    {report.number_of_weather_plz}")
-    print(f"Building PLZ total:       {report.number_of_building_plz} "
-          f"(without weather match: {report.number_of_building_plz_without_weather})")
+    print(
+        f"Building PLZ total:       {report.number_of_building_plz} "
+        f"(without weather match: {report.number_of_building_plz_without_weather})"
+    )
     print(f"Date range:               {report.date_range_min} .. {report.date_range_max}")
     print(f"Processing time:          {report.processing_time_seconds:.1f}s")
     top_nan = sorted(

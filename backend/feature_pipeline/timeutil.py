@@ -22,9 +22,9 @@ def quarter_hour_columns(columns: list[str]) -> list[str]:
     with a slightly different header order still work. Order among the
     returned names does not matter: each is converted to an explicit
     ``(hour, minute)`` offset before being combined with ``Datum``, so the
-    physical column order in the CSV (…, 23:45, 00:00) never matters either —
-    "00:00" is always the *first* quarter hour of that same ``Datum``, per the
-    brief.
+    physical column order does not control the timestamp. Ingest converts each
+    interval-end label to its interval start, treating the terminal 00:00 as
+    the end of the same Datum's last quarter-hour.
     """
     return [c for c in columns if QUARTER_COLUMN_RE.match(c.strip())]
 
@@ -55,9 +55,7 @@ def add_calendar_columns(lf: pl.LazyFrame, ts_col: str = "ts") -> pl.LazyFrame:
         pl.col(ts_col).dt.date().alias("_date"),
         pl.col(ts_col).dt.truncate("1h").alias("_ts_hour"),
     )
-    daypart_exprs = [
-        daypart_expr("_hour", w).alias(f"is_{w.name}") for w in windows.all()
-    ]
+    daypart_exprs = [daypart_expr("_hour", w).alias(f"is_{w.name}") for w in windows.all()]
     lf = lf.with_columns(daypart_exprs)
     lf = lf.with_columns(
         pl.col("_month").is_in(list(windows.summer_months)).alias("is_summer"),

@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class MappingResult:
-    # mp_id (str) -> gp_nr (str), one row per MP ID.
+    # mp_id (str) -> gp_nr (i64), one row per MP ID.
     mp_to_building: pl.DataFrame
-    # gp_nr (str) -> num_mp_ids (u32).
+    # gp_nr (i64) -> num_mp_ids (u32).
     building_mp_counts: pl.DataFrame
     # MP IDs present in the mapping input files that could not be resolved to
     # exactly one GP-Nr (ambiguous or unresolved joins). Kept for the audit
@@ -36,11 +36,12 @@ class MappingResult:
     # The same set, split by reason, for a more precise audit report.
     unresolved_mp_ids: list[str]
     ambiguous_mp_ids: list[str]
+    cohort_mapping: pl.DataFrame
 
 
 def load_mapping(paths: PathsConfig) -> MappingResult:
-    mp_zp = read_csv_flexible(paths.mp_mapping_file)
-    zp_gp = read_csv_flexible(paths.zaehler_gp_file)
+    mp_zp = read_csv_flexible(paths.mp_mapping_file, infer_schema_length=0)
+    zp_gp = read_csv_flexible(paths.zaehler_gp_file, infer_schema_length=0)
 
     mp_col = find_column(mp_zp.columns, "MP ID", "MP-ID", "MPID")
     zp_col_a = find_column(mp_zp.columns, "Zählpunktbezeichnung", "Zaehlpunktbezeichnung")
@@ -54,17 +55,16 @@ def load_mapping(paths: PathsConfig) -> MappingResult:
     gp_col = find_column(zp_gp.columns, "GPartner", "GP-Nr", "GPNr")
     if zp_col_b is None or gp_col is None:
         raise ValueError(
-            f"Zähler-GP.csv: expected 'Zählpunktbezeichnung' and 'GPartner' "
-            f"columns, found {zp_gp.columns!r}"
+            f"Zähler-GP.csv: expected 'Zählpunktbezeichnung' and 'GPartner' columns, found {zp_gp.columns!r}"
         )
 
     mp_zp = mp_zp.select(
         pl.col(mp_col).cast(pl.Utf8).str.strip_chars().alias("mp_id"),
         pl.col(zp_col_a).cast(pl.Utf8).str.strip_chars().alias("zaehlpunkt"),
-    )
+    ).drop_nulls(["mp_id", "zaehlpunkt"])
     zp_gp = zp_gp.select(
         pl.col(zp_col_b).cast(pl.Utf8).str.strip_chars().alias("zaehlpunkt"),
-        pl.col(gp_col).cast(pl.Utf8).str.strip_chars().alias("gp_nr"),
+        pl.col(gp_col).cast(pl.Utf8).str.strip_chars().cast(pl.Int64, strict=False).alias("gp_nr"),
     )
 
     joined = mp_zp.join(zp_gp, on="zaehlpunkt", how="left")
@@ -85,12 +85,8 @@ def load_mapping(paths: PathsConfig) -> MappingResult:
     # The brief already reports this is verified (0 MPs with >1 building), but
     # we defend against a stray duplicate row in the CSVs rather than silently
     # double-counting a meter under two buildings.
-    per_mp_building_count = (
-        resolved.group_by("mp_id").agg(pl.col("gp_nr").n_unique().alias("n_gp"))
-    )
-    ambiguous_mp_ids = (
-        per_mp_building_count.filter(pl.col("n_gp") > 1).get_column("mp_id").to_list()
-    )
+    per_mp_building_count = resolved.group_by("mp_id").agg(pl.col("gp_nr").n_unique().alias("n_gp"))
+    ambiguous_mp_ids = per_mp_building_count.filter(pl.col("n_gp") > 1).get_column("mp_id").to_list()
     if ambiguous_mp_ids:
         logger.warning(
             "%d MP ID(s) map to more than one GP-Nr; dropping them from the "
@@ -103,14 +99,10 @@ def load_mapping(paths: PathsConfig) -> MappingResult:
 
     # A meter can appear more than once in mpid_zähler_mapping.csv (harmless
     # duplicate rows); keep one mapping per MP ID.
-    mp_to_building = resolved.unique(subset=["mp_id"], keep="first").select(
-        "mp_id", "gp_nr"
-    )
+    mp_to_building = resolved.unique(subset=["mp_id"], keep="first").select("mp_id", "gp_nr")
 
     building_mp_counts = (
-        mp_to_building.group_by("gp_nr")
-        .agg(pl.col("mp_id").n_unique().alias("num_mp_ids"))
-        .sort("gp_nr")
+        mp_to_building.group_by("gp_nr").agg(pl.col("mp_id").n_unique().alias("num_mp_ids")).sort("gp_nr")
     )
 
     return MappingResult(
@@ -119,4 +111,8 @@ def load_mapping(paths: PathsConfig) -> MappingResult:
         dropped_mp_ids=sorted(set(dropped)),
         unresolved_mp_ids=sorted(set(unresolved.get_column("mp_id").to_list())),
         ambiguous_mp_ids=sorted(set(ambiguous_mp_ids)),
+        cohort_mapping=zp_gp.select("gp_nr")
+        .drop_nulls()
+        .unique()
+        .join(mp_to_building, on="gp_nr", how="left"),
     )

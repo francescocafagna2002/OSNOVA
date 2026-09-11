@@ -8,6 +8,7 @@ stripped) so a harmless header variation does not break the pipeline.
 
 from __future__ import annotations
 
+import csv
 import gzip
 import io
 from pathlib import Path
@@ -25,6 +26,7 @@ def _read_bytes(path: Path) -> bytes:
         with gzip.open(path, "rb") as fh:
             return fh.read()
     return path.read_bytes()
+
 
 _UMLAUT_FOLD = str.maketrans(
     {
@@ -58,6 +60,12 @@ def sniff_delimiter(path: Path, candidates: str = ";,\t|") -> str:
     return best if counts[best] > 0 else ","
 
 
+def read_csv_header(path: Path) -> list[str]:
+    opener = gzip.open if _is_gzip(path) else open
+    with opener(path, "rt", encoding="utf-8-sig", errors="replace", newline="") as source:
+        return next(csv.reader(source, delimiter=sniff_delimiter(path)), [])
+
+
 def find_column(columns: list[str], *candidates: str) -> str | None:
     """Find the real column name matching one of ``candidates`` (normalised)."""
     lookup = {normalise(c): c for c in columns}
@@ -76,11 +84,11 @@ def read_csv_flexible(path: Path, **kwargs) -> pl.DataFrame:
     """
     delimiter = sniff_delimiter(path)
     source = io.BytesIO(_read_bytes(path)) if _is_gzip(path) else path
+    kwargs.setdefault("infer_schema_length", 10_000)
     return pl.read_csv(
         source,
         separator=delimiter,
         encoding="utf8-lossy",
-        infer_schema_length=10_000,
         try_parse_dates=False,
         **kwargs,
     )

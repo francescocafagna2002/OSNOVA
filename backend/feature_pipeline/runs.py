@@ -30,9 +30,7 @@ def add_run_columns(
     second pass.
     """
     is_first = pl.int_range(pl.len()).over(group_col) == 0
-    gap_ok = (
-        pl.col(ts_col).diff().over(group_col) == pl.duration(minutes=interval_minutes)
-    ).fill_null(False)
+    gap_ok = (pl.col(ts_col).diff().over(group_col) == pl.duration(minutes=interval_minutes)).fill_null(False)
     same_as_prev = (pl.col(cond_col) == pl.col(cond_col).shift(1).over(group_col)).fill_null(False)
 
     run_break = is_first | (~gap_ok) | (~same_as_prev)
@@ -41,9 +39,7 @@ def add_run_columns(
     run_start_col = f"{prefix}_run_start"
 
     lf = lf.with_columns(run_break.alias(run_start_col))
-    lf = lf.with_columns(
-        pl.col(run_start_col).cum_sum().over(group_col).alias(run_id_col)
-    )
+    lf = lf.with_columns(pl.col(run_start_col).cum_sum().over(group_col).alias(run_id_col))
     lf = lf.with_columns(pl.len().over([group_col, run_id_col]).alias(run_len_col))
     return lf
 
@@ -54,8 +50,4 @@ def block_start_flag(prefix: str, cond_col: str, min_intervals: int) -> pl.Expr:
     qualifying (``cond_col`` true, long enough) block. Summing this per
     building over the whole timeline gives the block *count*.
     """
-    return (
-        pl.col(cond_col)
-        & pl.col(f"{prefix}_run_start")
-        & (pl.col(f"{prefix}_run_len") >= min_intervals)
-    )
+    return pl.col(cond_col) & pl.col(f"{prefix}_run_start") & (pl.col(f"{prefix}_run_len") >= min_intervals)

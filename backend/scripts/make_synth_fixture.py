@@ -68,7 +68,7 @@ def build_weather_lookup(plz_list, start, days, seed):
     """
     lookup: dict[tuple[str, date], dict[int, dict]] = {}
     for plz in plz_list:
-        rng_w = random.Random(hash((seed, plz)) & 0xFFFFFFFF)
+        rng_w = random.Random(f"{seed}:{plz}")
         for d in daterange(start, days):
             base_temp = seasonal_temp(d, rng_w)
             cloud_factor = rng_w.uniform(0.25, 1.0)
@@ -112,9 +112,20 @@ def make_weather(plz_list, start, days, weather_lookup, out_dir: Path) -> None:
 
 def make_labels(buildings, out_path: Path, rng: random.Random) -> None:
     header = [
-        "GP-Nr", "PLZ", "Ort", "Kanton", "WärmePumpe", "PV", "PV-Leistung in kWp",
-        "Batterie/Speicher", "Ladestation für Elektrofahrzeuge", "Wärmepumpenboiler",
-        "Datum Unterschrift", "geplanter Baustart", "Übergabe", "InBetrieb-Datum",
+        "GP-Nr",
+        "PLZ",
+        "Ort",
+        "Kanton",
+        "WärmePumpe",
+        "PV",
+        "PV-Leistung in kWp",
+        "Batterie/Speicher",
+        "Ladestation für Elektrofahrzeuge",
+        "Wärmepumpenboiler",
+        "Datum Unterschrift",
+        "geplanter Baustart",
+        "Übergabe",
+        "InBetrieb-Datum",
     ]
     rows = []
     for b in buildings:
@@ -243,7 +254,7 @@ def generate(
     buildings = []
     mp_counter = 1
     for i in range(n_buildings):
-        gp_nr = f"GP{i:06d}"
+        gp_nr = 100000 + i
         plz = rng.choice(PLZ_POOL)
         profile = DEVICE_PROFILES[i % len(DEVICE_PROFILES)]
         n_mp = 2 if rng.random() < 0.08 else 1
@@ -272,40 +283,43 @@ def generate(
     make_labels(buildings, out / "HackDays2026 - GIGI.csv", rng)
 
     log(f"Generating consumption for {len(buildings)} buildings x {days} days...")
-    consumption_dir = out / "2024"
+    consumption_dir = out / str(start.year)
     consumption_dir.mkdir(parents=True, exist_ok=True)
     out_path = consumption_dir / "LG_AIM2Hackerdays_kWh_synth.csv"
     with open(out_path, "w", newline="", encoding="utf-8-sig") as fh:
         writer = csv.writer(fh, delimiter=";")
-        writer.writerow(["MP ID", "OBIS-Code", "Datum", "PLZ", *CSV_COLUMN_ORDER])
+        writer.writerow(["MP ID", "OBIS-Code", "Datum", "PLZ", *CSV_COLUMN_ORDER, ""])
         for b in buildings:
             for mp_id in b["mp_ids"]:
                 for d, values in generate_building_series(b, start, days, rng, weather_by_plz):
-                    row = [mp_id, "1-1:1.29.0*255", d.strftime("%d.%m.%Y"), b["plz"]]
-                    row += [values[label] for label in CSV_COLUMN_ORDER]
-                    writer.writerow(row)
-        # A duplicate-OBIS row for one MP+day, to exercise duplicate collapsing.
-        first_mp = buildings[0]["mp_ids"][0]
-        first_day = start
-        dup_row = [first_mp, "1-1:2.29.0*255", first_day.strftime("%d.%m.%Y"), buildings[0]["plz"]]
-        dup_row += [0.0 for _ in CSV_COLUMN_ORDER]
-        writer.writerow(dup_row)
+                    for code, sign in (("1-1:1.29.0*255", 1), ("1-1:2.29.0*255", -1)):
+                        row = [mp_id, code, d.strftime("%d.%m.%Y"), b["plz"]]
+                        row += [max(0, sign * values[label]) / 4 for label in QUARTER_LABELS]
+                        writer.writerow([*row, ""])
         # Rows for the two unmapped MP IDs (present in consumption, absent
         # from the mapping chain) so the unmapped-MP audit has something to
         # report.
         for mp_id in ("MP-UNMAPPED-1", "MP-UNMAPPED-2"):
             for d, values in generate_building_series(
-                {"plz": PLZ_POOL[0], "profile": "baseline", "mp_ids": []}, start, min(5, days), rng, weather_by_plz
+                {"plz": PLZ_POOL[0], "profile": "baseline", "mp_ids": []},
+                start,
+                min(5, days),
+                rng,
+                weather_by_plz,
             ):
-                row = [mp_id, "1-1:1.29.0*255", d.strftime("%d.%m.%Y"), PLZ_POOL[0]]
-                row += [values[label] for label in CSV_COLUMN_ORDER]
-                writer.writerow(row)
+                for code, sign in (("1-1:1.29.0*255", 1), ("1-1:2.29.0*255", -1)):
+                    row = [mp_id, code, d.strftime("%d.%m.%Y"), PLZ_POOL[0]]
+                    row += [max(0, sign * values[label]) / 4 for label in QUARTER_LABELS]
+                    writer.writerow([*row, ""])
 
     truth_path = out / "truth.json"
     import json
 
     truth_path.write_text(
-        json.dumps([{"gp_nr": b["gp_nr"], "profile": b["profile"], "labeled": b["labeled"]} for b in buildings], indent=2),
+        json.dumps(
+            [{"gp_nr": b["gp_nr"], "profile": b["profile"], "labeled": b["labeled"]} for b in buildings],
+            indent=2,
+        ),
         encoding="utf-8",
     )
     log(f"Done. Ground truth for validation written to {truth_path}")

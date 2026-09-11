@@ -117,11 +117,35 @@ class TemperatureBin:
 
 
 @dataclass(frozen=True)
+class CohortConfig:
+    labeled_only: bool = False
+    extra_random_gps: int = 300
+    seed: int = 42
+
+    def __post_init__(self):
+        if self.extra_random_gps < 0:
+            raise ValueError("extra_random_gps must be non-negative")
+
+
+@dataclass(frozen=True)
 class ThresholdsConfig:
     """All numeric thresholds. Every one is referenced by name from feature code."""
 
     interval_minutes: int = 15
     timezone: str = "Europe/Zurich"
+    unit_factor: float = 4.0
+    import_obis: str = "1-1:1.29.0*255"
+    export_obis: str = "1-1:2.29.0*255"
+    date_format: str = "%d.%m.%Y"
+    min_valid_intervals_per_day: int = 90
+    weather_interval_end_vars: tuple[str, ...] = (
+        "shortwave_radiation",
+        "direct_radiation",
+        "diffuse_radiation",
+        "sunshine_duration",
+        "precipitation",
+        "snowfall",
+    )
 
     # --- shared "near zero" / "meaningful signal" epsilons ---
     near_zero_epsilon_kw: float = 0.2
@@ -160,15 +184,14 @@ class ThresholdsConfig:
     # --- MP -> building aggregation strategy, centralised (see mapping.py) ---
     # "sum": building_power_kw(t) = sum of power_kw of all MPs of that GP-Nr at t.
     multi_mp_strategy: str = "sum"
-    # Strategy for >1 raw row at the exact same (MP ID, timestamp) — e.g. a
-    # second OBIS-Code row. OBIS-Code itself is not used to split import/export
-    # per the brief, so duplicates are collapsed the same way multi-MP is.
+    # Strategy for repeated rows within the same MP, timestamp and OBIS channel.
     duplicate_mp_timestamp_strategy: str = "sum"
 
 
 @dataclass(frozen=True)
 class PipelineConfig:
     paths: PathsConfig = field(default_factory=PathsConfig)
+    cohort: CohortConfig = field(default_factory=CohortConfig)
     windows: TimeWindows = field(default_factory=TimeWindows)
     thresholds: ThresholdsConfig = field(default_factory=ThresholdsConfig)
 
