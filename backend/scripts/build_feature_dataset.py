@@ -76,6 +76,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--extra-random-gps", type=int, default=cohort_defaults.extra_random_gps)
     parser.add_argument("--seed", type=int, default=cohort_defaults.seed)
     parser.add_argument("--labeled-only", action="store_true", help="Exclude the additional random GPs")
+    parser.add_argument(
+        "--include-gps",
+        type=int,
+        nargs="+",
+        default=[],
+        help="GP numbers that must be in the cohort even if unlabeled and not sampled",
+    )
     parser.add_argument("--intermediate-dir", type=Path, default=None)
     parser.add_argument(
         "--limit-buildings",
@@ -121,7 +128,10 @@ def main(argv: list[str] | None = None) -> int:
         paths=paths,
         thresholds=ThresholdsConfig(),
         cohort=CohortConfig(
-            labeled_only=args.labeled_only, extra_random_gps=args.extra_random_gps, seed=args.seed
+            labeled_only=args.labeled_only,
+            extra_random_gps=args.extra_random_gps,
+            seed=args.seed,
+            include_gps=tuple(args.include_gps),
         ),
     )
 

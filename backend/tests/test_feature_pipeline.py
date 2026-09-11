@@ -578,6 +578,10 @@ class CohortTests(unittest.TestCase):
         self.assertEqual(select_cohort(mapping, labels, CohortConfig()).height, 6)
         with self.assertRaises(ValueError):
             CohortConfig(extra_random_gps=-1)
+        # include_gps forces unlabeled, unsampled GPs in; an unknown GP is skipped, not an error
+        forced = select_cohort(mapping, labels, CohortConfig(labeled_only=True, include_gps=(5, 3, 4242)))
+        self.assertEqual(forced["gp_nr"].to_list(), [1, 3, 5])
+        self.assertEqual(forced.filter("is_labeled")["gp_nr"].to_list(), [1])
 
     def test_ingest_filters_cohort_and_produces_net_kw_with_nulls(self):
         from feature_pipeline.config import ThresholdsConfig

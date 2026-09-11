@@ -121,6 +121,9 @@ class CohortConfig:
     labeled_only: bool = False
     extra_random_gps: int = 300
     seed: int = 42
+    # GPs that must be in the cohort regardless of labels or sampling (e.g. buildings AEW asks
+    # to see). Unknown to Table 4 -> skipped with a warning, never an error.
+    include_gps: tuple[int, ...] = ()
 
     def __post_init__(self):
         if self.extra_random_gps < 0:
