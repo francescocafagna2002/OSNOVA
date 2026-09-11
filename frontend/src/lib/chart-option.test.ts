@@ -11,6 +11,7 @@ import {
   minutesFromStart,
   TICK_MINUTES,
 } from "@/lib/chart-option";
+import { ASSET_BY_KEY } from "@/lib/predictions";
 import { CHART } from "@/lib/theme";
 import { makeBuilding } from "@/test/fixtures";
 
@@ -46,6 +47,22 @@ describe("eventsToBands", () => {
       [0, 90],
     ]);
     expect(bands.every((b) => b.label === "EV charging")).toBe(true);
+  });
+
+  it("draws the backend's heat-pump and battery events as bands with the asset colours", () => {
+    const bands = eventsToBands(
+      [
+        { type: "heat_pump_heating", start: "2026-09-09T05:00:00+02:00", end: "2026-09-09T08:00:00+02:00" },
+        { type: "battery_cycle", start: "2026-09-09T18:00:00+02:00", end: "2026-09-09T21:00:00+02:00" },
+      ],
+      startMs,
+    );
+    expect(bands.map((b) => [b.type, b.label, b.startMin, b.endMin])).toEqual([
+      ["heat_pump_heating", "Heat pump heating", 300, 480],
+      ["battery_cycle", "Battery charging / discharging", 1080, 1260],
+    ]);
+    expect(bands[0].color).toBe(ASSET_BY_KEY.heatPump.color);
+    expect(bands[1].color).toBe(ASSET_BY_KEY.battery.color);
   });
 
   it("clips bands to the day and drops events entirely outside it", () => {

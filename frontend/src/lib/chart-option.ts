@@ -16,6 +16,8 @@ const AXIS_FONT_SIZE = 12;
 const BAND_OPACITY: Record<BuildingEventType, number> = {
   pv_generation: 0.14,
   ev_charging: 0.12,
+  heat_pump_heating: 0.12,
+  battery_cycle: 0.12,
   high_consumption: 0.1,
 };
 
@@ -23,6 +25,8 @@ const BAND_OPACITY: Record<BuildingEventType, number> = {
 const BAND_LABEL_COLOR: Record<BuildingEventType, string> = {
   ev_charging: "#0065A8",
   pv_generation: "#B8791A",
+  heat_pump_heating: "#B4451F",
+  battery_cycle: "#2B7D44",
   high_consumption: "#65727D",
 };
 
