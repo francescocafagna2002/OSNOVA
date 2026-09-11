@@ -29,7 +29,7 @@ from osnova.export.schema import (
     ShapFeature,
     to_fe_predictions,
 )
-from osnova.io.lastgang import feature_dataset_path, load_building_chunk
+from osnova.io.lastgang import feature_dataset_path, gp_nr_expr, load_building_chunk, to_gp_nr
 from osnova.io.store import Store
 
 log = logging.getLogger(__name__)
@@ -40,6 +40,8 @@ INTERVALS_PER_DAY = 96
 MAX_EVENTS_PER_DAY = 8
 EVENING_BEFORE = time(18)  # events from the evening before are folded into the showcase day by the FE
 CANTON = "AG"
+GIGI_COLUMNS = {"gp_nr": "GP-Nr", "ort": "Ort", "kanton": "Kanton"}  # Table 2 header names, stripped
+GIGI_NAME_HINTS = ("gigi", "table2")
 MODEL = "LightGBM gradient-boosted trees, one per asset"
 INPUTS = ["15-minute import and export load profiles"]
 ADDITIONAL_DATA = ["Open-Meteo hourly weather per postcode"]
@@ -53,14 +55,14 @@ LABEL_COLUMNS: dict[str, str] = {
     "ev": "label_ev",
 }
 
-ReasonsFn = Callable[[str, str, dict], list[str]]  # (gp_nr, asset, prediction row) -> reasons
+ReasonsFn = Callable[[int, str, dict], list[str]]  # (gp_nr, asset, prediction row) -> reasons
 
 
-def DEFAULT_REASONS(gp_nr: str, asset: str, pred_row: dict) -> list[str]:  # noqa: N802 - card name
+def DEFAULT_REASONS(gp_nr: int, asset: str, pred_row: dict) -> list[str]:  # noqa: N802 - card name
     return [DEFAULT_REASON]
 
 
-def building_id(gp_nr: str) -> str:
+def building_id(gp_nr: int) -> str:
     return f"AG-{gp_nr}"
 
 
@@ -69,8 +71,8 @@ def _iso(ts: datetime) -> str:
     return ts.replace(tzinfo=TZ).isoformat()
 
 
-def _gp_str(df: pl.DataFrame) -> pl.DataFrame:
-    return df.with_columns(gp_nr=pl.col("gp_nr").cast(pl.String).str.strip_chars())
+def _gp_int(df: pl.DataFrame) -> pl.DataFrame:
+    return df.with_columns(gp_nr=gp_nr_expr()).drop_nulls("gp_nr")
 
 
 # --------------------------------------------------------------------------- pieces
@@ -78,7 +80,7 @@ def _gp_str(df: pl.DataFrame) -> pl.DataFrame:
 
 def latest_predictions(preds: pl.DataFrame) -> pl.DataFrame:
     """One row per gp_nr (the max year when a year column exists); shap_* columns default to "[]"."""
-    df = _gp_str(preds)
+    df = _gp_int(preds)
     if "year" in df.columns:
         df = df.sort("year")
     df = df.unique("gp_nr", keep="last", maintain_order=True)
@@ -132,11 +134,12 @@ def ground_truth(label_row: dict | None) -> GroundTruth | None:
 
 
 def build_building(
-    gp_nr: str,
+    gp_nr: int,
     *,
     plz: str,
     city: str,
     pred_row: dict,
+    canton: str = CANTON,
     day: date,
     day_rows: pl.DataFrame,
     events: pl.DataFrame,
@@ -156,7 +159,7 @@ def build_building(
         id=building_id(gp_nr),
         postcode=plz,
         city=city,
-        canton=CANTON,
+        canton=canton,
         predictions=to_fe_predictions(probs),
         electricity=electricity_for_day(day_rows, day),
         events=events_for_day(events, day),
@@ -184,7 +187,7 @@ class ExportInputs:
     showcase: pl.DataFrame
     events: pl.DataFrame
     labels: pl.DataFrame | None  # feature_dataset.parquet: gp_nr, plz, label_*
-    ort: dict[str, str]  # gp_nr -> Ort from the registry (GIGI), when present
+    gigi: dict[int, dict[str, str]]  # gp_nr -> {"ort", "kanton"} from Table 2 (GIGI), when present
 
 
 def load_labels(store: Store) -> pl.DataFrame | None:
@@ -193,27 +196,59 @@ def load_labels(store: Store) -> pl.DataFrame | None:
         return None
     df = pl.read_parquet(path)
     cols = ["gp_nr", *[c for c in ("plz", *LABEL_COLUMNS.values()) if c in df.columns]]
-    return _gp_str(df.select(cols)).unique("gp_nr", keep="first")
+    return _gp_int(df.select(cols)).unique("gp_nr", keep="first")
 
 
-def load_ort(store: Store) -> dict[str, str]:
-    path = store.registry_path()
-    if not path.exists():
+def find_gigi_file(registry_root: Path) -> Path | None:
+    """Table 2 on the registry mount: `HackDays2026 - GIGI.csv` (Renku) or `Table2_Buildings.xlsx` (synth)."""
+    if not registry_root.exists():
+        return None
+    for p in sorted(registry_root.rglob("*")):
+        if (
+            p.is_file()
+            and p.suffix.lower() in (".csv", ".xlsx")
+            and any(h in p.name.lower() for h in GIGI_NAME_HINTS)
+        ):
+            return p
+    return None
+
+
+def load_gigi(registry_root: Path) -> dict[int, dict[str, str]]:
+    """gp_nr -> {"ort", "kanton"} from the GIGI table (first non-empty value per building)."""
+    path = find_gigi_file(registry_root)
+    if path is None:
         return {}
-    reg = pl.read_parquet(path)
-    if "ort" not in reg.columns:
+    if path.suffix.lower() == ".xlsx":
+        df = pl.read_excel(path, infer_schema_length=0)
+    else:
+        df = pl.read_csv(
+            path, separator=";", infer_schema_length=0, encoding="utf8-lossy", truncate_ragged_lines=True
+        )
+    df = df.rename({c: c.strip() for c in df.columns})
+    if GIGI_COLUMNS["gp_nr"] not in df.columns:
+        log.warning("%s has no %r column; city falls back to PLZ", path, GIGI_COLUMNS["gp_nr"])
         return {}
-    reg = _gp_str(reg.select("gp_nr", "ort")).drop_nulls().filter(pl.col("ort").str.len_chars() > 0)
-    return dict(reg.unique("gp_nr", keep="first").iter_rows())
+    cols = {k: v for k, v in GIGI_COLUMNS.items() if v in df.columns}
+    clean = (
+        df.select(
+            [pl.col(v).cast(pl.String).str.strip_chars().replace("", None).alias(k) for k, v in cols.items()]
+        )
+        .with_columns(gp_nr=gp_nr_expr())
+        .drop_nulls("gp_nr")
+    )
+    agg = clean.group_by("gp_nr").agg([pl.col(k).drop_nulls().first() for k in cols if k != "gp_nr"])
+    return {
+        int(r["gp_nr"]): {k: v for k, v in r.items() if k != "gp_nr" and v} for r in agg.iter_rows(named=True)
+    }
 
 
 def load_inputs(store: Store) -> ExportInputs:
     return ExportInputs(
         predictions=latest_predictions(pl.read_parquet(store.predictions_path())),
-        showcase=_gp_str(pl.read_parquet(store.showcase_path())),
-        events=_gp_str(pl.read_parquet(store.events_path())),
+        showcase=_gp_int(pl.read_parquet(store.showcase_path())),
+        events=_gp_int(pl.read_parquet(store.events_path())),
         labels=load_labels(store),
-        ort=load_ort(store),
+        gigi=load_gigi(store.settings.registry_root),
     )
 
 
@@ -223,13 +258,13 @@ def load_inputs(store: Store) -> ExportInputs:
 def build_buildings(
     store: Store,
     cfg: Config,
-    featured_ids: list[str],
-    other_ids: list[str],
+    featured_ids: list[int],
+    other_ids: list[int],
     reasons_fn: ReasonsFn = DEFAULT_REASONS,
 ) -> list[Building]:
     """Featured first, then the others. Buildings without predictions or series are skipped (logged)."""
     inputs = load_inputs(store)
-    wanted = [(str(g), True) for g in featured_ids] + [(str(g), False) for g in other_ids]
+    wanted = [(to_gp_nr(g), True) for g in featured_ids] + [(to_gp_nr(g), False) for g in other_ids]
     series_by_gp = load_building_chunk(store, [g for g, _ in wanted])
     preds = {r["gp_nr"]: r for r in inputs.predictions.iter_rows(named=True)}
     showcase = {r["gp_nr"]: r for r in inputs.showcase.iter_rows(named=True)}
@@ -250,11 +285,13 @@ def build_buildings(
         )
         label_row = labels.get(gp)
         plz = series["plz"].drop_nulls().first() or (label_row or {}).get("plz") or ""
+        gigi = inputs.gigi.get(gp, {})
         out.append(
             build_building(
                 gp,
                 plz=str(plz),
-                city=inputs.ort.get(gp) or str(plz),
+                city=gigi.get("ort") or str(plz),
+                canton=gigi.get("kanton") or CANTON,
                 pred_row=pred_row,
                 day=day,
                 day_rows=series.filter(pl.col("ts").dt.date() == day),
@@ -267,19 +304,19 @@ def build_buildings(
     return out
 
 
-def write_featured(store: Store, featured: list[str], others: list[str]) -> Path:
+def write_featured(store: Store, featured: list[int], others: list[int]) -> Path:
     path = store.featured_json()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"featured": list(featured), "others": list(others)}, indent=1))
     return path
 
 
-def load_featured(store: Store) -> tuple[list[str], list[str]] | None:
+def load_featured(store: Store) -> tuple[list[int], list[int]] | None:
     path = store.featured_json()
     if not path.exists():
         return None
     data = json.loads(path.read_text())
-    return [str(g) for g in data.get("featured", [])], [str(g) for g in data.get("others", [])]
+    return [to_gp_nr(g) for g in data.get("featured", [])], [to_gp_nr(g) for g in data.get("others", [])]
 
 
 def write_buildings(store: Store, buildings: list[Building]) -> Path:
@@ -290,6 +327,8 @@ def write_buildings(store: Store, buildings: list[Building]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(payload.model_dump_json(exclude_none=False))
     write_featured(
-        store, [b.id[3:] for b in ordered if b.featured], [b.id[3:] for b in ordered if not b.featured]
+        store,
+        [int(b.id[3:]) for b in ordered if b.featured],
+        [int(b.id[3:]) for b in ordered if not b.featured],
     )
     return path

@@ -35,17 +35,21 @@ def meter_year(synth_dir, meter_id: int, year: int, cfg=None):
     return make_meter_year(lg, load_synth_weather(synth_dir, str(lg["plz"][0])), cfg or FeatureConfig())
 
 
-def synth_gp_nr(truth: dict, meter_id: int) -> str:
-    """gp_nr string of a synth meter; unlabeled meters get a fake 9xxxxx building id."""
+def synth_gp_nr(truth: dict, meter_id: int) -> int:
+    """gp_nr of a synth meter; unlabeled meters get a fake 9xxxxx building id."""
     gp = truth["meters"][str(meter_id)]["gp_nr"]
-    return str(gp) if gp is not None else f"9{meter_id:05d}"
+    return int(gp) if gp is not None else int(f"9{meter_id:05d}")
 
 
-def write_synth_by_file(synth_dir, store, truth: dict, years=(2023, 2024)) -> dict[int, str]:
+def write_synth_by_file(
+    synth_dir, store, truth: dict, years=(2023, 2024), *, legacy_power_kw: bool = False
+) -> dict[int, int]:
     """Write the synth lastgang in the feature_pipeline by_file layout (one Parquet per source file).
 
-    Columns: gp_nr (str), ts (Datetime us, local naive, interval start), power_kw (f64, net,
-    negative = export), plz (str), num_mp_with_data (u32). Returns {meter_id: gp_nr}.
+    Revised 2026-09-11 layout: gp_nr (i64), ts (Datetime us, local naive, interval start), plz (str),
+    import_kw, export_kw, net_kw (f32, net negative = export), num_mp_with_data (i32).
+    legacy_power_kw=True writes the pre-revision layout (gp_nr str, power_kw f64 net) instead.
+    Returns {meter_id: gp_nr}.
     """
     import polars as pl
 
@@ -83,14 +87,36 @@ def write_synth_by_file(synth_dir, store, truth: dict, years=(2023, 2024)) -> di
                     * 4.0,
                 )
                 .group_by(["MP ID", "ts"])
-                .agg(power_kw=pl.col("signed").sum().cast(pl.Float64), plz=pl.col("PLZ").first())
-                .with_columns(
-                    gp_nr=pl.col("MP ID").replace_strict(gp_of, return_dtype=pl.String),
-                    num_mp_with_data=pl.lit(1, dtype=pl.UInt32),
+                .agg(
+                    power_kw=pl.col("signed").sum().cast(pl.Float64),
+                    import_kw=pl.col("signed").filter(pl.col("signed") > 0).sum().cast(pl.Float32),
+                    export_kw=(-pl.col("signed").filter(pl.col("signed") < 0).sum()).cast(pl.Float32),
+                    plz=pl.col("PLZ").first(),
                 )
-                .select(["gp_nr", "ts", "power_kw", "plz", "num_mp_with_data"])
+                .with_columns(
+                    gp_nr=pl.col("MP ID").replace_strict(gp_of, return_dtype=pl.Int64),
+                    net_kw=pl.col("power_kw").cast(pl.Float32),
+                )
                 .sort(["gp_nr", "ts"])
             )
+            if legacy_power_kw:
+                long = long.select(
+                    pl.col("gp_nr").cast(pl.String),
+                    "ts",
+                    "power_kw",
+                    "plz",
+                    pl.lit(1, dtype=pl.UInt32).alias("num_mp_with_data"),
+                )
+            else:
+                long = long.select(
+                    "gp_nr",
+                    "ts",
+                    "plz",
+                    "import_kw",
+                    "export_kw",
+                    "net_kw",
+                    pl.lit(1, dtype=pl.Int32).alias("num_mp_with_data"),
+                )
             long.write_parquet(out_dir / f"{f.stem}.parquet")
     return gp_of
 
@@ -108,6 +134,7 @@ def write_synth_feature_dataset(store, truth: dict) -> None:
             {
                 "gp_nr": synth_gp_nr(truth, int(m)),
                 "plz": t["plz"],
+                "num_mp_ids": 1,
                 "label_pv": int(t["pv"]) if lab else None,
                 "label_ev": int(t["ev"]) if lab else None,
                 "label_heatpump": int(t["heat_pump"]) if lab else None,

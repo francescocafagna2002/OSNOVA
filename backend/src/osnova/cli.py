@@ -310,14 +310,20 @@ def export(
         featured=featured_ids,
         duration_s=round(time.perf_counter() - t0, 1),
     )
-    typer.echo(f"featured: {', '.join(featured_ids) or '(none)'}")
+    typer.echo(f"featured: {', '.join(map(str, featured_ids)) or '(none)'}")
     typer.echo(f"wrote {len(buildings)} buildings ({n_featured} featured) to {path}")
 
 
 @app.command()
 def api(host: str = "127.0.0.1", port: int = 8000) -> None:
-    """Serve the exported JSON over HTTP."""
-    _stub("Session 3", "C7")
+    """Serve export/buildings.json and per-date profiles over HTTP (GET /health, /buildings, ...)."""
+    import uvicorn
+
+    from osnova.api.app import create_app
+    from osnova.io.store import Store
+
+    settings, _ = _ctx(None)
+    uvicorn.run(create_app(Store(settings)), host=host, port=port)
 
 
 if __name__ == "__main__":

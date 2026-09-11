@@ -71,7 +71,7 @@ def building_frame(series: pl.DataFrame, weather_hourly: pl.DataFrame | None) ->
     return series.join(w, on="ts", how="left")
 
 
-def events_for_building(gp_nr: str, frame: pl.DataFrame, cfg: Config) -> pl.DataFrame:
+def events_for_building(gp_nr: int, frame: pl.DataFrame, cfg: Config) -> pl.DataFrame:
     """All detectors, then the high-load fallback on what is left. EVENTS schema."""
     if frame.height == 0:
         return pl.DataFrame(schema=EVENTS)
@@ -83,14 +83,14 @@ def events_for_building(gp_nr: str, frame: pl.DataFrame, cfg: Config) -> pl.Data
     parts.append(detect_high_load(frame, claimed, cfg.events).with_columns(type=pl.lit("high_consumption")))
     return (
         pl.concat(parts)
-        .with_columns(gp_nr=pl.lit(gp_nr))
+        .with_columns(gp_nr=pl.lit(gp_nr, dtype=pl.Int64))
         .select(list(EVENTS.keys()))
         .cast(dict(EVENTS))
         .sort("start")
     )
 
 
-def showcase_for_building(gp_nr: str, series: pl.DataFrame, events: pl.DataFrame, cfg: Config) -> dict:
+def showcase_for_building(gp_nr: int, series: pl.DataFrame, events: pl.DataFrame, cfg: Config) -> dict:
     picked = pick_showcase_day(events, cfg.events)
     if picked is None:
         return {"gp_nr": gp_nr, "showcase_date": last_full_day(series), "n_event_types": 0}

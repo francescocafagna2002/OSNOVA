@@ -11,7 +11,8 @@ from osnova.export.build_json import build_buildings, electricity_for_day, event
 from osnova.export.curate import pick_featured, pick_others
 from osnova.export.schema import BuildingsFile
 from osnova.io.lastgang import feature_dataset_path
-from osnova.io.store import REGISTRY, Store
+from osnova.io.store import Store
+from osnova.synth.generate import ORT
 from tests.helpers import write_synth_by_file, write_synth_feature_dataset, write_synth_weather
 
 ASSETS = ("pv", "battery", "heat_pump", "ev")
@@ -54,7 +55,7 @@ def test_export_end_to_end(settings, synth_dir, truth):
     showcase = pl.read_parquet(store.showcase_path())
     labels = pl.read_parquet(feature_dataset_path(store))
     featured = pick_featured(labels, preds, showcase, n=3, min_types=2, min_plz=2)
-    assert 1 <= len(featured) <= 3 and all(isinstance(g, str) for g in featured)
+    assert 1 <= len(featured) <= 3 and all(isinstance(g, int) for g in featured)
     others = pick_others(list(gp_of.values()), featured, n=5, seed=0)
     assert len(others) == 5 and not set(others) & set(featured)
     buildings = build_buildings(store, Config(), featured, others)
@@ -64,7 +65,8 @@ def test_export_end_to_end(settings, synth_dir, truth):
     b = parsed[0]
     mid = next(m for m, g in gp_of.items() if g == featured[0])
     t = truth["meters"][str(mid)]
-    assert b.id == f"AG-{featured[0]}" and b.postcode == t["plz"] and b.city == t["plz"] and b.canton == "AG"
+    assert b.id == f"AG-{featured[0]}" and b.postcode == t["plz"] and b.canton == "AG"
+    assert b.city == ORT[t["plz"]]  # Ort from the synth GIGI table (Table 2) for labeled buildings
     assert len(b.electricity) == 96 and b.electricity[0].timestamp.endswith(("+01:00", "+02:00"))
     assert b.profileDate == b.electricity[0].timestamp[:10]
     assert (
@@ -80,44 +82,30 @@ def test_export_end_to_end(settings, synth_dir, truth):
     )
     assert b.explanation.assets["pv"].shap[0].feature == "midday_dip_ratio"
     assert b.explanation.assets["ev"].shap == [] and b.explanation.assets["ev"].reasons
-    unlabeled = [
-        x
-        for x in parsed
-        if x.id[3:] in {g for m, g in gp_of.items() if not truth["meters"][str(m)]["labeled"]}
-    ]
-    assert all(x.groundTruth is None for x in unlabeled)
+    unlabeled_ids = {g for m, g in gp_of.items() if not truth["meters"][str(m)]["labeled"]}
+    unlabeled = [x for x in parsed if int(x.id[3:]) in unlabeled_ids]
+    assert unlabeled and all(x.groundTruth is None and x.city == x.postcode for x in unlabeled)
     assert json.loads(store.featured_json().read_text()) == {"featured": featured, "others": others}
 
 
-def test_city_from_registry_when_present(settings, synth_dir, truth):
+def test_city_falls_back_to_plz_without_gigi(settings, synth_dir, truth):
+    settings = settings.model_copy(update={"registry_dir": settings.store_dir / "nowhere"})
     store, gp_of, _ = _prepared_store(settings, synth_dir, truth)
     labeled = [g for m, g in gp_of.items() if truth["meters"][str(m)]["labeled"]][:2]
-    reg = pl.DataFrame(
-        {
-            "meter_id": [1, 2],
-            "zaehlpunkt": ["a", "b"],
-            "gp_nr": [int(labeled[0]), int(labeled[1])],
-            "anlage": ["x", "y"],
-            "plz": ["5000", "5400"],
-            "ort": ["Aarau", None],
-            "kanton": ["AG", "AG"],
-            "meters_per_gp": [1, 1],
-            "has_pv": [True, False],
-            "has_battery": [False, False],
-            "has_hp": [False, False],
-            "has_ev": [False, False],
-            "has_hp_boiler": [False, False],
-            "pv_kwp": [4.0, None],
-            "commissioned_on": [None, None],
-        }
-    ).cast(dict(REGISTRY))
-    reg.write_parquet(store.registry_path())
-    by_id = {b.id: b for b in build_buildings(store, Config(), labeled, [])}
-    assert by_id[f"AG-{labeled[0]}"].city == "Aarau"
-    assert (
-        by_id[f"AG-{labeled[1]}"].city
-        == truth["meters"][str(next(m for m, g in gp_of.items() if g == labeled[1]))]["plz"]
+    for b in build_buildings(store, Config(), labeled, []):
+        assert b.city == b.postcode and b.canton == "AG"
+
+
+def test_featured_requires_single_meter_building(settings, synth_dir, truth):
+    store, gp_of, preds = _prepared_store(settings, synth_dir, truth)
+    showcase = pl.read_parquet(store.showcase_path())
+    labels = pl.read_parquet(feature_dataset_path(store))
+    first = pick_featured(labels, preds, showcase, n=1, min_types=2, min_plz=1)
+    assert len(first) == 1
+    multi = labels.with_columns(
+        num_mp_ids=pl.when(pl.col("gp_nr") == first[0]).then(2).otherwise(pl.col("num_mp_ids")).cast(pl.Int32)
     )
+    assert first[0] not in pick_featured(multi, preds, showcase, n=3, min_types=2, min_plz=1)
 
 
 def test_electricity_for_day_fills_gaps():
