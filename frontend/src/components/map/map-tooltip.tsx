@@ -28,7 +28,7 @@ export function MapTooltip({ plz, count, x, y, containerWidth }: MapTooltipProps
       <span className="font-medium text-navy">{formatPlz(plz)}</span>
       <span className="text-muted-foreground">
         {" · "}
-        {count} {count === 1 ? "building" : "buildings"}
+        {count === 0 ? "No buildings" : `${count} ${count === 1 ? "building" : "buildings"}`}
       </span>
     </div>
   );

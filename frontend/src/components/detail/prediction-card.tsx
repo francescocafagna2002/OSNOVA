@@ -26,7 +26,7 @@ export function PredictionCard({ assetKey, probability, explanation }: Predictio
         <Icon className="size-5" style={{ color: meta.color }} aria-hidden />
         {meta.label}
       </div>
-      <div className="font-serif text-[34px] leading-none font-semibold text-navy tabular-nums">
+      <div className="text-[34px] leading-none font-semibold text-navy tabular-nums">
         {formatProbability(probability)}
       </div>
       <div className="flex items-center justify-between gap-2">

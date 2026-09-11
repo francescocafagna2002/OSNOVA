@@ -1,6 +1,6 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { Check, Info } from "lucide-react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ASSET_BY_KEY, formatContribution, getPredictionLabel } from "@/lib/predictions";
@@ -27,16 +27,16 @@ export function WhyPopover({ assetKey, probability, explanation }: WhyPopoverPro
   return (
     <Popover>
       <PopoverTrigger
-        aria-label={`Why ${meta.shortLabel}?`}
-        className="text-[13px] font-medium text-primary hover:text-navy hover:underline focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:outline-none"
+        aria-label={`View insights for ${meta.shortLabel}`}
+        className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-primary focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:outline-none"
       >
-        Why?
+        <Info className="size-4" aria-hidden />
       </PopoverTrigger>
       <PopoverContent
         align="end"
         className="w-72 rounded-[12px] border border-border p-4 shadow-[0_4px_16px_rgba(20,40,60,0.10)] ring-0"
       >
-        <div className="font-serif text-[15px] font-semibold text-navy">
+        <div className="text-[15px] font-semibold text-navy">
           Why {meta.shortLabel} is {label}
         </div>
         <ul className="mt-2 space-y-1.5 text-sm">

@@ -118,9 +118,29 @@ describe("MapView", () => {
     expect(useUIStore.getState().selectedPlz).toBeNull();
   });
 
+  it("ignores clicks on a zone without buildings and keeps the current selection", async () => {
+    renderWithProviders(<MapView />);
+    await mountMap();
+    await clickWith([feature("5001", 0)]);
+    expect(useUIStore.getState().selectedPlz).toBeNull();
+    useUIStore.getState().selectPlz("5400");
+    await clickWith([feature("5001", 0)]);
+    expect(useUIStore.getState().selectedPlz).toBe("5400");
+  });
+
+  it("shows no pointer cursor over a zone without buildings but still names it", async () => {
+    renderWithProviders(<MapView />);
+    await mountMap();
+    await act(() => (mapMock.props.onMouseMove as Handler)({ features: [feature("5000", 0)], point: { x: 40, y: 50 } }));
+    expect(mapMock.props.cursor).toBe("grab");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("5000 Aarau · No buildings");
+    await act(() => (mapMock.props.onMouseMove as Handler)({ features: [feature("5000", 2)], point: { x: 40, y: 50 } }));
+    expect(mapMock.props.cursor).toBe("pointer");
+  });
+
   it("clears the tooltip when the pointer leaves the map container", async () => {
     renderWithProviders(<MapView />);
-    await waitFor(() => expect(mapMock.props.onMouseMove).toBeTypeOf("function"));
+    await mountMap();
     await act(() => (mapMock.props.onMouseMove as Handler)({ features: [feature("5000", 2)], point: { x: 40, y: 50 } }));
     expect(screen.getByRole("tooltip")).toBeInTheDocument();
     fireEvent.mouseLeave(screen.getByTestId("map-view"));

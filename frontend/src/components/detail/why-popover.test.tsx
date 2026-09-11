@@ -22,7 +22,7 @@ describe("WhyPopover", () => {
   it("opens with a probability-phrased title, reasons and SHAP bars", async () => {
     const building = makeBuilding();
     render(<WhyPopover assetKey="ev" probability={76} explanation={building.explanation.assets.ev} />);
-    await userEvent.click(screen.getByRole("button", { name: "Why EV?" }));
+    await userEvent.click(screen.getByRole("button", { name: "View insights for EV" }));
     expect(await screen.findByText("Why EV is possible")).toBeInTheDocument();
     expect(screen.getByText("Repeated high-power events")).toBeInTheDocument();
     expect(screen.getByText("High nighttime power peak")).toBeInTheDocument();

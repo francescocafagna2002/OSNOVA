@@ -12,7 +12,7 @@ export function Wordmark() {
         AEW
       </div>
       <div className="leading-tight md:whitespace-nowrap">
-        <div className="font-serif text-[15px] font-semibold text-navy">Energy Fingerprints</div>
+        <div className="text-[15px] font-semibold text-navy">Energy Fingerprints</div>
         {/* The subtitle is what pushes the 56 px header onto two lines below ~1280 px. */}
         <div className="hidden text-[11px] text-muted-foreground xl:block">Energy Data Hackdays 2026</div>
       </div>

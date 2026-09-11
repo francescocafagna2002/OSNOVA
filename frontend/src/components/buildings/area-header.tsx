@@ -16,7 +16,7 @@ export function AreaHeader() {
   return (
     <div className="flex items-start justify-between gap-2 border-b px-4 py-3">
       <div>
-        <h2 className="font-serif text-lg text-navy">{title}</h2>
+        <h2 className="text-lg text-navy">{title}</h2>
         <p className="text-[13px] text-muted-foreground">{isLoading ? "Loading…" : count}</p>
       </div>
       {selectedPlz && (

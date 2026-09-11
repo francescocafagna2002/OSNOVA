@@ -32,8 +32,7 @@ describe("BuildingDetailSheet", () => {
     expect(screen.getByTestId("prediction-card-ev")).toHaveTextContent("Possible");
     expect(screen.getByTestId("electricity-chart")).toHaveAttribute("data-events", "2");
     expect(screen.getByText("Electricity profile — Last 24 hours")).toBeInTheDocument();
-    expect(screen.getByText("How is this calculated?")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Show technical details/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Show technical prediction details/ })).toBeInTheDocument();
   });
 
   it("closes via the close control but keeps the selection", async () => {

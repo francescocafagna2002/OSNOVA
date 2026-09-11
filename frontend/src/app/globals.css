@@ -7,10 +7,11 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  /* Inter is the only typeface; serif/mono/heading aliases exist so stray utilities still resolve to it. */
   --font-sans: var(--font-sans), Inter, Arial, "Helvetica Neue", sans-serif;
-  --font-serif: var(--font-serif), "Source Serif 4", Georgia, serif;
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-serif);
+  --font-serif: var(--font-sans), Inter, Arial, "Helvetica Neue", sans-serif;
+  --font-mono: var(--font-sans), Inter, Arial, "Helvetica Neue", sans-serif;
+  --font-heading: var(--font-sans), Inter, Arial, "Helvetica Neue", sans-serif;
   --color-surface-soft: var(--surface-soft);
   --color-border-medium: var(--border-medium);
   --color-text-dark: var(--text-dark);

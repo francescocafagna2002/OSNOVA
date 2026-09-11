@@ -38,6 +38,11 @@ function plzFeatureAt(event: MapLayerMouseEvent): PlzCountProperties | undefined
   return event.features?.[0]?.properties as PlzCountProperties | undefined;
 }
 
+/** Zones without buildings are drawn grey and behave like the map background. */
+function isInteractive(feature: PlzCountProperties | undefined): feature is PlzCountProperties {
+  return feature !== undefined && feature.count > 0;
+}
+
 export function MapView() {
   const mapRef = useRef<MapRef>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -98,6 +103,8 @@ export function MapView() {
         selectPlz(null);
         return;
       }
+      // An empty zone is not clickable: the click changes nothing.
+      if (!isInteractive(feature)) return;
       selectPlz(feature.plz === selectedPlz ? null : feature.plz);
     },
     [selectPlz, selectedPlz],
@@ -169,11 +176,15 @@ export function MapView() {
           onClick={handleClick}
           onMouseMove={handleMouseMove}
           onMouseLeave={clearHover}
-          cursor={hover ? "pointer" : "grab"}
+          cursor={hover && hover.count > 0 ? "pointer" : "grab"}
           style={{ width: "100%", height: "100%" }}
         >
           <NavigationControl position="bottom-right" showCompass={false} />
-          <PlzLayers data={data} highlightedPlz={highlightedPlz} hoveredPlz={hover?.plz ?? null} />
+          <PlzLayers
+            data={data}
+            highlightedPlz={highlightedPlz}
+            hoveredPlz={hover && hover.count > 0 ? hover.plz : null}
+          />
         </Map>
       )}
       <MapTooltip

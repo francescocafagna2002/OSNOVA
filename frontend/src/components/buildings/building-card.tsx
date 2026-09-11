@@ -26,7 +26,7 @@ export function BuildingCard({ building, selected, onSelect }: BuildingCardProps
           <Building2 className="size-[18px]" aria-hidden />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate font-serif text-[17px] font-semibold text-navy">Building {building.id}</div>
+          <div className="truncate text-[17px] font-semibold text-navy">Building {building.id}</div>
           <div className="text-[13px] text-muted-foreground">
             {building.postcode} {building.city}
           </div>

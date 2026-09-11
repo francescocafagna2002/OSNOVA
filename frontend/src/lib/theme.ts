@@ -27,9 +27,12 @@ export const MAP = {
   roadMinor: "#E3E5E4",
   water: "#DDE9ED",
   label: "#1F2933",
-  plzFill: "#EAF2FA",
-  plzBorder: "#AFC2D8",
+  plzFill: "#D8E7F5",
+  plzBorder: "#7FA4C8",
   plzHover: "#D9E8F6",
+  /** Zones with no buildings in the dataset: quiet grey, no hover, no click. */
+  plzEmptyFill: "#CDD2D7",
+  plzEmptyBorder: "#AEB5BC",
 } as const;
 
 export const CHART = {

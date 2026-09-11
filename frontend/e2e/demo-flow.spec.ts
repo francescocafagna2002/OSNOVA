@@ -17,7 +17,7 @@ test.describe("Energy Fingerprints demo flow (spec §11)", () => {
 
     // 3. Select the demo building → sheet with four labelled predictions
     await card.click();
-    // Named, because the "Why?" popover is a dialog too and can outlive its own close
+    // Named, because the "View insights" popover is a dialog too and can outlive its own close
     // transition long enough to make a bare `getByRole("dialog")` ambiguous below.
     const sheet = page.getByRole("dialog", { name: /Building AG-004711/ });
     await expect(sheet).toBeVisible();
@@ -41,19 +41,16 @@ test.describe("Energy Fingerprints demo flow (spec §11)", () => {
     await expect(chart.getByText("EV charging").first()).toBeVisible();
     await expect(chart.getByText("Possible PV generation").first()).toBeVisible();
 
-    // 5. Why? popover for EV
-    await sheet.getByRole("button", { name: "Why EV?" }).click();
+    // 5. "View insights" popover for EV
+    await sheet.getByRole("button", { name: "View insights for EV" }).click();
     await expect(page.getByText("Why EV is possible")).toBeVisible();
     await expect(page.getByText("Repeated high-power events")).toBeVisible();
     await page.keyboard.press("Escape");
 
     // 6. Technical details
-    await sheet.getByRole("button", { name: /Show technical details/ }).click();
+    await sheet.getByRole("button", { name: /Show technical prediction details/ }).click();
     await expect(sheet.getByText("EV prediction: 76%")).toBeVisible();
-    // The "Why EV?" popover closed in step 5 is still finishing its ~100ms
-    // close transition and still holds a "+0.31" SHAP node, so the text
-    // matches twice; .first() targets the technical-details one.
-    await expect(sheet.getByText("+0.31").first()).toBeVisible();
+    await expect(sheet.getByText("Very high power draw during the night")).toBeVisible();
 
     // 7. Close and return to the full list
     await sheet.getByRole("button", { name: /close/i }).click();

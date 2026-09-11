@@ -2,7 +2,6 @@
 
 import { ElectricityChart } from "@/components/chart/electricity-chart";
 import { PredictionCards } from "@/components/detail/prediction-cards";
-import { PredictionExplanation } from "@/components/detail/prediction-explanation";
 import { TechnicalDetails } from "@/components/detail/technical-details";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useSelectedBuilding } from "@/hooks/use-buildings";
@@ -33,12 +32,11 @@ export function BuildingDetailSheet() {
             <div className="space-y-8 px-6 pb-6">
               <PredictionCards predictions={building.predictions} explanation={building.explanation} />
               <section>
-                <h3 className="mb-3 font-serif text-lg font-semibold text-navy">
+                <h3 className="mb-3 text-lg font-semibold text-navy">
                   Electricity profile — Last 24 hours
                 </h3>
                 <ElectricityChart electricity={building.electricity} events={building.events} />
               </section>
-              <PredictionExplanation />
               <TechnicalDetails explanation={building.explanation} predictions={building.predictions} />
             </div>
           </>
