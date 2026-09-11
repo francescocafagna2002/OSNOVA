@@ -68,7 +68,10 @@ WEATHER = pl.Schema(
         "hdd15": F32,
     }
 )
-FEATURE_KEYS = pl.Schema({"meter_id": I64, "year": I32, "plz": STR, "n_days": I32})
+# Feature table = feature_pipeline's feature_dataset.parquet: one row per building (gp_nr, whole
+# history, team decision 2026-09-11). These are the key columns; feature columns are FINAL_COLUMNS in
+# feature_pipeline/pipeline.py. PREDICTIONS / EVENTS / SHOWCASE move to gp_nr in Sessions 2 and 3.
+FEATURE_KEYS = pl.Schema({"gp_nr": I64, "plz": STR, "n_valid_days": I32})
 LABELS = pl.Schema(
     {"meter_id": I64, "year": I32, "gp_nr": I64, "asset": STR, "label": pl.Int8, "weight": F32, "source": STR}
 )
@@ -150,8 +153,12 @@ class Store:
     def weather_path(self, plz: str) -> Path:
         return self.weather_dir() / f"plz={plz}.parquet"
 
+    def feature_output_dir(self) -> Path:
+        """feature_pipeline output (scripts/build_feature_dataset.py --output-dir)."""
+        return self.root / "feature_output"
+
     def features_path(self) -> Path:
-        return self.root / "features.parquet"
+        return self.feature_output_dir() / "feature_dataset.parquet"
 
     def features_skipped_path(self) -> Path:
         return self.root / "features_skipped.parquet"
