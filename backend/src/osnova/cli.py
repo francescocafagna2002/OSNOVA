@@ -254,9 +254,64 @@ def _metrics_table(metrics: dict) -> str:
 
 
 @app.command()
-def export(config: Path | None = ConfigOpt, featured: int = 10, others: int = 200) -> None:
-    """Everything -> export/buildings.json (id = AG-{gp_nr})."""
-    _stub("Session 3", "C4")
+def export(
+    config: Path | None = ConfigOpt,
+    featured: int = 10,
+    others: int = 200,
+    min_types: int = typer.Option(
+        3, "--min-types", help="featured: distinct event types on the showcase day"
+    ),
+    min_plz: int = typer.Option(5, "--min-plz", help="featured: warn when spread over fewer PLZ"),
+    recurate: bool = typer.Option(False, "--recurate", help="ignore export/featured.json and pick again"),
+) -> None:
+    """predictions + showcase + events + building series -> export/buildings.json (+ featured.json)."""
+    import time
+
+    import polars as pl
+
+    from osnova.export.build_json import build_buildings, load_featured, load_labels, write_buildings
+    from osnova.export.curate import pick_featured, pick_others
+    from osnova.io.lastgang import list_buildings
+    from osnova.io.store import Store
+
+    settings, cfg = _ctx(config)
+    store = Store(settings)
+    t0 = time.perf_counter()
+    pinned = None if recurate else load_featured(store)
+    if pinned is not None:
+        featured_ids, other_ids = pinned
+        typer.echo(f"reusing {store.featured_json()}")
+    else:
+        labels = load_labels(store)
+        featured_ids = pick_featured(
+            labels if labels is not None else pl.DataFrame({"gp_nr": []}, schema={"gp_nr": pl.String}),
+            pl.read_parquet(store.predictions_path()),
+            pl.read_parquet(store.showcase_path()),
+            n=featured,
+            min_types=min_types,
+            min_plz=min_plz,
+        )
+        other_ids = pick_others(list_buildings(store), featured_ids, n=others, seed=cfg.cohort.seed)
+    buildings = build_buildings(store, cfg, featured_ids, other_ids)
+    path = write_buildings(store, buildings)
+    n_featured = sum(b.featured for b in buildings)
+    store.write_manifest(
+        "export",
+        config=cfg.model_dump(),
+        inputs={
+            "predictions": store.predictions_path(),
+            "showcase": store.showcase_path(),
+            "events": store.events_path(),
+            "registry": store.registry_path(),
+        },
+        output=path,
+        n_buildings=len(buildings),
+        n_featured=n_featured,
+        featured=featured_ids,
+        duration_s=round(time.perf_counter() - t0, 1),
+    )
+    typer.echo(f"featured: {', '.join(featured_ids) or '(none)'}")
+    typer.echo(f"wrote {len(buildings)} buildings ({n_featured} featured) to {path}")
 
 
 @app.command()
