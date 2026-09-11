@@ -20,13 +20,13 @@ from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_s
 from sklearn.model_selection import StratifiedKFold
 
 from osnova.config import Config
-from osnova.io.store import PREDICTIONS
+from osnova.io.store import FEATURE_KEYS, PREDICTIONS
 from osnova.models.baseline import BaselineConfig, baseline_scores
 from osnova.models.explain import shap_top
 
 TRAIN_ORDER: tuple[str, ...] = ("pv", "heat_pump", "ev", "battery")
 PV_PROB = "pv_prob"  # second-stage feature for the battery model
-NON_FEATURE_COLUMNS = frozenset({"gp_nr", "plz", "num_mp_ids", "n_valid_days"})
+NON_FEATURE_COLUMNS = frozenset({*FEATURE_KEYS, "num_mp_ids"})  # keys + the audit column
 LABEL_PREFIX = "label_"
 # Existing notebooks on branch `jenia` (dataanalysis/ev_prediction): the EV model is trained on per-interval
 # daily-profile features (profile_HH_MM, overall_mean, ...) that feature_dataset.parquet does not carry;

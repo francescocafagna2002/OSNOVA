@@ -185,9 +185,8 @@ def train(
     settings, cfg = _ctx(config)
     store = Store(settings)
     t0 = time.perf_counter()
-    feature_dir = store.root / "feature_output"
-    features_path = features or feature_dir / "feature_dataset.parquet"
-    dates_path = dates or feature_dir / "gigi_dates.parquet"
+    features_path = features or store.features_path()
+    dates_path = dates or store.feature_output_dir() / "gigi_dates.parquet"
     if not features_path.exists():
         typer.echo(f"missing {features_path} (feature_dataset.parquet from feature_pipeline)", err=True)
         raise typer.Exit(code=1)
