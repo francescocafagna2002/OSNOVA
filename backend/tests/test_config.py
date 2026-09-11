@@ -19,7 +19,8 @@ def test_defaults_match_spec():
     assert cfg.features.ev_thresholds_kw == (3.0, 5.0, 7.0, 11.0)
     assert cfg.events.ev_residual_kw == 2.5
     assert cfg.labels.unlabeled_weight == 0.5
-    assert cfg.cohort.unlabeled_sample == 3000
+    assert cfg.cohort.seed == 42
+    assert cfg.events.pv_dip_hours == (9, 17) and cfg.events.battery_conf_both == 0.8
     assert cfg.weather.timezone == "Europe/Zurich" and cfg.weather.utc_time_column == "timestamp_utc"
 
 

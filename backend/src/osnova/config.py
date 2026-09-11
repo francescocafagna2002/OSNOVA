@@ -39,7 +39,11 @@ class OsnovaSettings(BaseSettings):
 
 
 class CohortConfig(BaseModel):
-    unlabeled_sample: int = 3000
+    """The cohort itself is chosen by feature_pipeline (CohortConfig.extra_random_gps there).
+
+    This seed only draws the random "others" sample of `osnova export`.
+    """
+
     seed: int = 42
 
 
@@ -93,11 +97,35 @@ class EventConfig(BaseModel):
     ev_gap_merge: int = 2
     ev_plateau_cv_max: float = 0.25
     ev_known_plateaus_kw: tuple[float, ...] = (3.7, 7.0, 11.0)
+    # PV generation windows (events/pv_windows.py)
     pv_export_min_kw: float = 0.1
+    pv_dip_hours: tuple[int, int] = (9, 17)  # search window for the net-load dip, [start, end)
+    pv_dip_ratio: float = 0.5  # net < ratio x night baseline counts as "dip"
+    pv_dip_min_intervals: int = 8
+    pv_radiation_corr_min: float = 0.5
+    pv_conf_export_with_radiation: float = 0.9
+    pv_conf_export: float = 0.7
+    pv_conf_dip: float = 0.5
+    # Heat-pump heating (events/hp_heating.py)
     hp_excess_kw: float = 0.8
     hp_min_transitions: int = 3
+    hp_transition_window: int = 12  # intervals (3 h) in which >= hp_min_transitions switches count as cycling
+    hp_morning_block: tuple[int, int] = (4, 10)  # a sustained run inside these hours is the morning block
+    hp_morning_min_intervals: int = 8
+    hp_night_baseline_quantile: float = 0.1  # fallback when the meter has no summer nights
+    hp_conf_no_temperature: float = 0.5
+    hp_conf_range: tuple[float, float] = (0.3, 0.9)
+    # Battery cycles (events/battery_cycles.py)
     battery_near_zero_kw: float = 0.1
+    battery_min_intervals: int = 4
+    battery_radiation_min_wm2: float = 50.0  # charging only counts while the sun is up
+    battery_evening: tuple[int, int] = (17, 23)
+    battery_conf_one: float = 0.6  # charging or discharging block found
+    battery_conf_both: float = 0.8  # both found on the same day
+    # High-consumption fallback (events/high_load.py)
+    high_load_quantile: float = 0.95
     high_load_min_intervals: int = 4
+    high_load_confidence: float = 0.5
     showcase_min_confidence: float = 0.6
 
 

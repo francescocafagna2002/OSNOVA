@@ -198,7 +198,7 @@ At feature time the hourly frame of a PLZ is upsampled to 15 minutes first (temp
 | `plz` | str | |
 | `n_valid_days` | i32 | days with a complete building series; replaces the per-year `min_days` filter (Session 1) |
 
-plus `num_mp_ids`, the feature columns, and `label_pv`, `label_ev`, `label_heatpump`, `label_battery` (three-valued, §3.7). `pv_presence` is `null` and reserved for the out-of-fold PV probability (battery second stage). Thresholds live in `feature_pipeline/config.py` (`ThresholdsConfig`); the table of config constants below is the 2026-09-10 `src/osnova/config.py` set and stays for the event detectors.
+plus `num_mp_ids`, the feature columns, and `label_pv`, `label_ev`, `label_heatpump`, `label_battery` (three-valued, §3.7). The out-of-fold PV probability for the battery second stage (`pv_prob`) is computed in `models/train.py`, not stored in the feature table. Thresholds live in `feature_pipeline/config.py` (`ThresholdsConfig`); the table of config constants below is the 2026-09-10 `src/osnova/config.py` set and stays for the event detectors.
 
 *Original 2026-09-10 text:* for every `(meter, year)` with ≥ `features.min_days = 300` days of `ok` data, build a `MeterYear` frame (lastgang rows of that year joined with weather, plus calendar columns `hour`, `minute_of_day`, `month`, `season`, `daypart`, `is_weekend`) and run every registered feature function. Output `features.parquet`, one row per meter-year, ~120 columns. Feature functions are pure: `def f(my: MeterYear, cfg: FeatureConfig) -> dict[str, float]`, registered per group with a decorator and unit-tested on synthetic data.
 

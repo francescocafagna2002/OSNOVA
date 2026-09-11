@@ -13,19 +13,13 @@ from osnova.events.ev_sessions import runs
 from osnova.events.pv_windows import WINDOW_SCHEMA, empty_windows
 
 INTERVAL = timedelta(minutes=15)
-# Card C6 literals; they belong in EventConfig once config.py is open to this stream.
-MIN_INTERVALS = 4
-RADIATION_MIN = 50.0  # W/m2: charging only counts while the sun is up
-EVENING = (17, 23)
-CONF_ONE = 0.6
-CONF_BOTH = 0.8
 
 
-def _runs_to_rows(day: pl.DataFrame, mask: np.ndarray, net: np.ndarray) -> list[dict]:
+def _runs_to_rows(day: pl.DataFrame, mask: np.ndarray, net: np.ndarray, min_intervals: int) -> list[dict]:
     ts = day["ts"]
     out = []
     for s, e in runs(mask):
-        if e - s < MIN_INTERVALS:
+        if e - s < min_intervals:
             continue
         seg = np.abs(net[s:e])
         out.append(
@@ -46,9 +40,12 @@ def _day_cycles(day: pl.DataFrame, cfg: EventConfig) -> list[dict]:
     near_zero = np.abs(net) < cfg.battery_near_zero_kw
     peak = int(rad.argmax())
     idx = np.arange(len(net))
-    charging = _runs_to_rows(day, near_zero & (idx < peak) & (rad > RADIATION_MIN), net)
-    discharging = _runs_to_rows(day, near_zero & (hour >= EVENING[0]) & (hour < EVENING[1]), net)
-    conf = CONF_BOTH if charging and discharging else CONF_ONE
+    lo, hi = cfg.battery_evening
+    charging = _runs_to_rows(
+        day, near_zero & (idx < peak) & (rad > cfg.battery_radiation_min_wm2), net, cfg.battery_min_intervals
+    )
+    discharging = _runs_to_rows(day, near_zero & (hour >= lo) & (hour < hi), net, cfg.battery_min_intervals)
+    conf = cfg.battery_conf_both if charging and discharging else cfg.battery_conf_one
     return [{**r, "confidence": conf} for r in charging + discharging]
 
 

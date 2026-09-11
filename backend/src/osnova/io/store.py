@@ -137,18 +137,6 @@ class Store:
         self.settings = settings
         self.root = settings.out
 
-    def registry_path(self) -> Path:
-        return self.root / "registry.parquet"
-
-    def cohort_path(self) -> Path:
-        return self.root / "cohort.parquet"
-
-    def lastgang_dir(self) -> Path:
-        return self.root / "lastgang"
-
-    def bucket_path(self, bucket: int) -> Path:
-        return self.lastgang_dir() / f"bucket={bucket:02d}" / "part.parquet"
-
     def weather_dir(self) -> Path:
         return self.root / "weather"
 
@@ -161,9 +149,6 @@ class Store:
 
     def features_path(self) -> Path:
         return self.feature_output_dir() / "feature_dataset.parquet"
-
-    def features_skipped_path(self) -> Path:
-        return self.root / "features_skipped.parquet"
 
     def labels_path(self) -> Path:
         return self.root / "labels.parquet"
@@ -206,7 +191,3 @@ class Store:
         }
         path.write_text(json.dumps(payload, indent=2, default=str))
         return path
-
-
-def scan_lastgang(store: Store) -> pl.LazyFrame:
-    return pl.scan_parquet(store.lastgang_dir() / "bucket=*" / "part.parquet")

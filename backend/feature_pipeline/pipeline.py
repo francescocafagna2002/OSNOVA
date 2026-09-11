@@ -50,7 +50,6 @@ FINAL_COLUMNS = [
     "num_mp_ids",
     "n_valid_days",
     # Battery
-    "pv_presence",
     "near_zero_interval_ratio",
     "number_of_near_zero_blocks",
     "daytime_near_zero_ratio",

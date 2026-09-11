@@ -1,5 +1,5 @@
 # src/osnova/cli.py
-"""osnova <stage> — one subcommand per pipeline stage. Stubs are replaced by the owning session.
+"""osnova <stage> — one subcommand per pipeline stage.
 
 registry / ingest / features are retired: feature_pipeline (scripts/build_feature_dataset.py) does
 ingest + features at the building (gp_nr) grain.
@@ -30,11 +30,6 @@ DatesOpt = typer.Option(
 
 def _ctx(config: Path | None) -> tuple[OsnovaSettings, Config]:
     return OsnovaSettings(), load_config(config)
-
-
-def _stub(stream: str, card: str) -> None:
-    typer.echo(f"not implemented: {stream} card {card}", err=False)
-    raise typer.Exit(code=2)
 
 
 FEATURE_PIPELINE_HINT = (
@@ -316,7 +311,7 @@ def export(
             "predictions": store.predictions_path(),
             "showcase": store.showcase_path(),
             "events": store.events_path(),
-            "registry": store.registry_path(),
+            "features": store.features_path(),
         },
         output=path,
         n_buildings=len(buildings),

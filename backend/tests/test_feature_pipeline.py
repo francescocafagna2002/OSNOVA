@@ -125,9 +125,6 @@ class FeaturePipelineSynthTests(unittest.TestCase):
         for col in ("label_pv", "label_ev", "label_heatpump", "label_battery"):
             self.assertTrue(sub.get_column(col).is_null().all(), col)
 
-    def test_pv_presence_is_always_null_placeholder(self):
-        self.assertTrue(self.df.get_column("pv_presence").is_null().all())
-
     def test_limit_buildings_restricts_output(self):
         with tempfile.TemporaryDirectory() as tmp2:
             root2 = Path(tmp2)

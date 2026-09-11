@@ -21,14 +21,6 @@ WINDOW_SCHEMA = pl.Schema(
     }
 )
 INTERVAL = timedelta(minutes=15)
-# Card C2 literals; they belong in EventConfig once config.py is open to this stream.
-DIP_HOURS = (9, 17)  # search window for the net-load dip, [start, end)
-DIP_RATIO = 0.5  # net < DIP_RATIO * night baseline counts as "dip"
-DIP_MIN_INTERVALS = 8
-RADIATION_CORR_MIN = 0.5
-CONF_EXPORT_WITH_RADIATION = 0.9
-CONF_EXPORT = 0.7
-CONF_DIP = 0.5
 
 
 def empty_windows() -> pl.DataFrame:
@@ -57,21 +49,22 @@ def _export_days(df: pl.DataFrame, cfg: EventConfig) -> pl.DataFrame:
         )
         .filter(pl.col("peak_kw") > thr)
         .with_columns(
-            confidence=pl.when(pl.col("rad_ok") & (pl.col("corr") > RADIATION_CORR_MIN))
-            .then(CONF_EXPORT_WITH_RADIATION)
-            .otherwise(CONF_EXPORT)
+            confidence=pl.when(pl.col("rad_ok") & (pl.col("corr") > cfg.pv_radiation_corr_min))
+            .then(cfg.pv_conf_export_with_radiation)
+            .otherwise(cfg.pv_conf_export)
         )
     )
     return days.select(["day", "start", "end", "confidence", "peak_kw", "energy_kwh"])
 
 
-def _dip_window(day: pl.DataFrame, night_baseline_kw: float) -> dict | None:
+def _dip_window(day: pl.DataFrame, night_baseline_kw: float, cfg: EventConfig) -> dict | None:
     hours = day["ts"].dt.hour().to_numpy()
-    in_window = (hours >= DIP_HOURS[0]) & (hours < DIP_HOURS[1])
+    lo, hi = cfg.pv_dip_hours
+    in_window = (hours >= lo) & (hours < hi)
     net = day["net_kw"].fill_null(np.inf).to_numpy().astype(np.float64)
-    mask = in_window & (net < DIP_RATIO * night_baseline_kw)
+    mask = in_window & (net < cfg.pv_dip_ratio * night_baseline_kw)
     best = max(runs(mask), key=lambda r: r[1] - r[0], default=None)
-    if best is None or best[1] - best[0] < DIP_MIN_INTERVALS:
+    if best is None or best[1] - best[0] < cfg.pv_dip_min_intervals:
         return None
     s, e = best
     seg = net[s:e]
@@ -79,7 +72,7 @@ def _dip_window(day: pl.DataFrame, night_baseline_kw: float) -> dict | None:
     return {
         "start": ts[s],
         "end": ts[e - 1] + INTERVAL,
-        "confidence": CONF_DIP,
+        "confidence": cfg.pv_conf_dip,
         "peak_kw": float(-seg.min()),
         "energy_kwh": float(np.clip(night_baseline_kw - seg, 0, None).sum() / 4),
     }
@@ -89,7 +82,8 @@ def detect_pv_windows(df: pl.DataFrame, night_baseline_kw: float, cfg: EventConf
     """df: ts, export_kw, net_kw, shortwave_radiation (nullable), is_sunny_day (nullable), any span of days.
 
     Export days: first..last interval with export > pv_export_min_kw. Otherwise on sunny days the
-    longest 09-17 run of net < 0.5 x night baseline (>= 8 intervals). Days with neither give no row.
+    longest pv_dip_hours run of net < pv_dip_ratio x night baseline (>= pv_dip_min_intervals).
+    Days with neither give no row.
     """
     if df.height == 0:
         return empty_windows()
@@ -101,7 +95,7 @@ def detect_pv_windows(df: pl.DataFrame, night_baseline_kw: float, cfg: EventConf
             pl.col("is_sunny_day").fill_null(False) & ~pl.col("day").is_in(export_days["day"].implode())
         )
         for _, day in sunny.partition_by("day", as_dict=True, maintain_order=True).items():
-            win = _dip_window(day, night_baseline_kw)
+            win = _dip_window(day, night_baseline_kw, cfg)
             if win is not None:
                 rows.append(win)
     dips = pl.DataFrame(rows, schema=WINDOW_SCHEMA) if rows else empty_windows()

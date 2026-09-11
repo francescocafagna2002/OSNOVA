@@ -2035,7 +2035,7 @@ def test_pv_features(synth_dir, truth):
 
 ### Task B5: battery features
 
-> **Superseded 2026-09-11 by feature_pipeline:** `feature_pipeline/features.py` (`pv_presence` reserved for the out-of-fold PV probability). Not to be implemented.
+> **Superseded 2026-09-11 by feature_pipeline:** `feature_pipeline/features.py` (the out-of-fold PV probability `pv_prob` is added by `models/train.py`). Not to be implemented.
 
 **Files:**
 - Create: `backend/src/osnova/features/battery.py`

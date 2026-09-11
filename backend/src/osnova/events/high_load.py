@@ -11,8 +11,6 @@ from osnova.config import EventConfig
 from osnova.events.pv_windows import WINDOW_SCHEMA, empty_windows
 
 INTERVAL = timedelta(minutes=15)
-P95 = 0.95
-CONFIDENCE = 0.5
 FULL_DAY = 96  # a run covering the whole day is a flat day, not a peak
 
 
@@ -25,7 +23,7 @@ def detect_high_load(df: pl.DataFrame, claimed: pl.DataFrame, cfg: EventConfig) 
         .sort("ts")
         .with_row_index("i")
         .with_columns(day=pl.col("ts").dt.date())
-        .with_columns(p95=pl.col("import_kw").quantile(P95).over("day"))
+        .with_columns(p95=pl.col("import_kw").quantile(cfg.high_load_quantile).over("day"))
         .filter(pl.col("import_kw") >= pl.col("p95"))
         .with_columns(run=(pl.col("i").diff().fill_null(2) != 1).cum_sum())
     )
@@ -58,7 +56,9 @@ def detect_high_load(df: pl.DataFrame, claimed: pl.DataFrame, cfg: EventConfig) 
         run_rows = run_rows.join(hits, on="run", how="anti")
     best = run_rows.sort(["day", "n", "start"], descending=[False, True, False]).unique("day", keep="first")
     return (
-        best.select("start", "end", pl.lit(CONFIDENCE).alias("confidence"), "peak_kw", "energy_kwh")
+        best.select(
+            "start", "end", pl.lit(cfg.high_load_confidence).alias("confidence"), "peak_kw", "energy_kwh"
+        )
         .cast(dict(WINDOW_SCHEMA))
         .sort("start")
     )

@@ -12,8 +12,8 @@ from osnova.io.weather import upsample_15min
 
 def test_store_paths(tmp_path: Path):
     st = Store(OsnovaSettings(store_dir=tmp_path))
-    assert st.lastgang_dir() == tmp_path / "osnova" / "lastgang"
-    assert st.bucket_path(5) == tmp_path / "osnova" / "lastgang" / "bucket=05" / "part.parquet"
+    assert st.weather_path("5000") == tmp_path / "osnova" / "weather" / "plz=5000.parquet"
+    assert st.events_path() == tmp_path / "osnova" / "events.parquet"
     assert st.buildings_json() == tmp_path / "osnova" / "export" / "buildings.json"
     assert st.features_path() == tmp_path / "osnova" / "feature_output" / "feature_dataset.parquet"
 

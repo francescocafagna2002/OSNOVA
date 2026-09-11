@@ -25,10 +25,10 @@ backend/
   src/osnova/
     config.py               # OsnovaSettings (paths from env) + every tunable threshold
     cli.py                  # `osnova <stage>`: one subcommand per pipeline stage
-    io/                     # store.py (Parquet schemas, paths, manifests), weather.py, registry, ingest
-    features/               # base.py (MeterYear, feature registry) + one module per asset group
+    io/                     # store.py (Parquet schemas, paths, manifests), weather.py, lastgang.py, check_data.py
+    features/               # base.py: calendar/weather helper used by the detectors
     events/                 # rule-based detectors and the showcase-day picker
-    labels/                 # meter-year labels from the registry
+    labels/                 # three-valued per-building labels from the GIGI flags
     models/                 # LightGBM training, prediction, SHAP, reasons text
     export/                 # schema.py (FE JSON contract) + buildings.json builder
     api/                    # optional read-only FastAPI app
@@ -73,14 +73,18 @@ live in `WeatherConfig`.
 
 ### Stages
 
-Run in this order; each stage is idempotent and writes a `_manifest_<stage>.json` next to its output:
+Run in this order; each stage is idempotent and writes a manifest next to its output:
 
 ```text
-check-data → registry → ingest → weather → features → events → train → export
+osnova check-data → osnova weather → scripts/build_feature_dataset.py → osnova train → osnova events → osnova export
 ```
 
-`osnova synth` generates laptop development data; `osnova api` serves the exported JSON (optional).
-Stages that are not implemented yet exit with code 2 and name the owning stream and card.
+`build_feature_dataset.py` is the `feature_pipeline` package: it ingests Table 1 for the cohort, joins
+Tables 3/4 and the GIGI labels, and writes `feature_output/feature_dataset.parquet` (one row per
+building) plus the building series under `feature_output/intermediate/by_file/`. `osnova train`,
+`events` and `export` read from there. `osnova registry|ingest|features` are retired and exit with
+code 2 pointing at the script. `osnova synth` generates laptop development data; `osnova api` serves
+the exported JSON (optional).
 
 ## Laptop loop (synthetic data only)
 
@@ -106,12 +110,14 @@ export OSNOVA_STORE_DIR=/path/to/output
 mkdir -p "$OSNOVA_STORE_DIR/osnova/logs"
 uv run osnova check-data --max-files 3 > check.md   # first; paste the report into the team chat
 uv run osnova weather                               # a minute; prints rows per PLZ
-nohup uv run osnova ingest > "$OSNOVA_STORE_DIR/osnova/logs/ingest.log" &
+python3 scripts/build_feature_dataset.py --limit-files 1      # smoke test, then the full run:
+nohup python3 scripts/build_feature_dataset.py > "$OSNOVA_STORE_DIR/osnova/logs/features.log" &
 ```
 
 Measured facts about the real mounts: `docs/superpowers/specs/data-check-<date>.md`.
 
-Then `weather`, `features`, `events`, `train`, `export`, and copy
+Then `uv run osnova train`, `uv run osnova events --workers 8`,
+`uv run osnova export --featured 10 --others 200`, and copy
 `$OSNOVA_STORE_DIR/osnova/export/buildings.json` to `frontend/public/data/` (gitignored).
 
 ## Building-level feature dataset

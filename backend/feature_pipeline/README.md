@@ -59,9 +59,9 @@ does not change those shared contracts. The measured input facts are in
   and OBIS channel. Building import, export and net power are then summed
   independently across MPs. A channel's building sum is null if an expected MP
   is absent or any contributing value is missing.
-- **`pv_presence` is `None` on purpose** — it is reserved for a future
-  out-of-fold P(PV) input to the battery classifier and must never be the
-  ground-truth PV label (target leakage).
+- **No PV-presence column.** The battery classifier's PV input is the
+  out-of-fold `pv_prob` that `src/osnova/models/train.py` computes in its
+  second stage; the ground-truth PV label is never a feature (target leakage).
 - **Null vs. zero**: a ratio with zero valid intervals is `null`, not `0`;
   `session_count` legitimately is `0` when a building has no candidate
   sessions. See the `_safe_ratio` helper in `features.py`.

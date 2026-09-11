@@ -16,7 +16,6 @@ FEATURE_DATASET_COLUMNS = [
     "plz",
     "num_mp_ids",
     "n_valid_days",
-    "pv_presence",
     "near_zero_interval_ratio",
     "number_of_near_zero_blocks",
     "daytime_near_zero_ratio",
@@ -184,7 +183,6 @@ def synthetic_table(
             "plz": ["5000"] * n,
             "num_mp_ids": np.ones(n, dtype=int),
             "n_valid_days": np.full(n, 900),
-            "pv_presence": pl.Series([None] * n, dtype=pl.Float64),  # all-null placeholder in the real table
             **cols,
             **flags,
         }

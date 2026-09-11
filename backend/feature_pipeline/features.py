@@ -102,9 +102,6 @@ def main_feature_exprs(cfg: PipelineConfig) -> list[pl.Expr]:
 
     # ---------------- Battery ----------------
     exprs += [
-        pl.lit(None, dtype=pl.Float64).alias("pv_presence"),  # TODO: replace with
-        # out-of-fold P(PV) once the PV classifier exists (battery model
-        # second stage). Ground-truth PV label must never be used here.
         _safe_ratio(pl.col("is_near_zero").sum(), valid.sum()).alias("near_zero_interval_ratio"),
         block_start_flag("nz", "is_near_zero", th.near_zero_min_intervals)
         .sum()

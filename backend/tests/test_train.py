@@ -29,7 +29,7 @@ def test_feature_columns_exclude_keys_labels_and_all_null():
     feats, _, _ = synthetic_table(20)
     cols = feature_columns(feats)
     assert "sessions_per_week" in cols and "mean_consumption_T_below_minus5" in cols
-    for banned in ("gp_nr", "plz", "num_mp_ids", "n_valid_days", "pv_presence"):
+    for banned in ("gp_nr", "plz", "num_mp_ids", "n_valid_days"):
         assert banned not in cols
     assert not any(c.startswith("label_") for c in cols)
 

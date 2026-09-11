@@ -19,7 +19,6 @@ from osnova.config import ASSETS
 FEATURE_LABELS: dict[str, str] = {
     "num_mp_ids": "Meters in the building",
     "n_valid_days": "Days with valid data",
-    "pv_presence": "PV presence placeholder",
     "pv_prob": "Estimated PV probability",
     # battery
     "near_zero_interval_ratio": "Share of intervals with net load near zero",
