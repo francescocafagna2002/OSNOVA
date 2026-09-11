@@ -33,6 +33,7 @@ backend/
     export/                 # schema.py (FE JSON contract) + buildings.json builder
     api/                    # optional read-only FastAPI app
     synth/                  # synthetic Tables 1-5 in the real file formats, with known injected assets
+  feature_pipeline/         # building-level ingest + whole-history feature extraction
   tests/                    # pytest; every test runs on synthetic data in tmp_path
   scripts/preview_data.py   # print header + first ten records of each CSV in a mount
 ```
@@ -112,6 +113,14 @@ Measured facts about the real mounts: `docs/superpowers/specs/data-check-<date>.
 
 Then `weather`, `features`, `events`, `train`, `export`, and copy
 `$OSNOVA_STORE_DIR/osnova/export/buildings.json` to `frontend/public/data/` (gitignored).
+
+## Building-level feature dataset
+
+`feature_pipeline/` turns raw consumption + MP-to-building mappings + hourly
+weather + the GIGI label file into `feature_dataset.parquet` (one row per
+`GP-Nr`). It does not train any model — see
+[`feature_pipeline/README.md`](feature_pipeline/README.md) for its CLI and
+output contracts. Local validation uses synthetic data only.
 
 ## Preview the data mount
 
