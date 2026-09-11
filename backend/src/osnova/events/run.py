@@ -10,8 +10,10 @@ from concurrent.futures import ProcessPoolExecutor
 import polars as pl
 
 from osnova.config import Config, OsnovaSettings
+from osnova.events.battery_cycles import detect_battery_cycles
 from osnova.events.ev_sessions import detect_ev_sessions
 from osnova.events.high_load import detect_high_load
+from osnova.events.hp_heating import detect_hp_heating
 from osnova.events.pv_windows import WINDOW_SCHEMA, detect_pv_windows, empty_windows
 from osnova.events.showcase import last_full_day, pick_showcase_day
 from osnova.io.lastgang import list_buildings, load_building_chunk
@@ -43,7 +45,20 @@ def night_baseline_kw(df: pl.DataFrame, cfg: Config) -> float:
     return float(v) if v is not None else 0.0
 
 
-DETECTORS: list[tuple[str, Detector]] = [("ev_charging", _ev), ("pv_generation", _pv)]
+def _hp(df: pl.DataFrame, cfg: Config) -> pl.DataFrame:
+    return detect_hp_heating(df, cfg.events, cfg.features)
+
+
+def _battery(df: pl.DataFrame, cfg: Config) -> pl.DataFrame:
+    return detect_battery_cycles(df, cfg.events)
+
+
+DETECTORS: list[tuple[str, Detector]] = [
+    ("ev_charging", _ev),
+    ("pv_generation", _pv),
+    ("heat_pump_heating", _hp),
+    ("battery_cycle", _battery),
+]
 
 
 def building_frame(series: pl.DataFrame, weather_hourly: pl.DataFrame | None) -> pl.DataFrame:
