@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import multiprocessing
 import time
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
@@ -124,7 +125,10 @@ def run_events(store: Store, cfg: Config, workers: int = 4) -> tuple[pl.DataFram
     buildings = list_buildings(store)
     chunks = [buildings[i : i + BUILDINGS_PER_SCAN] for i in range(0, len(buildings), BUILDINGS_PER_SCAN)]
     if workers > 1 and len(chunks) > 1:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
+        # spawn, not fork: a forked child inherits polars' thread pool in a locked state and
+        # deadlocks on Linux (Renku). macOS spawns by default, which is why tests never saw it.
+        ctx = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as pool:
             results = list(
                 pool.map(process_chunk, [store.settings] * len(chunks), chunks, [cfg] * len(chunks))
             )
