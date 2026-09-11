@@ -1,4 +1,5 @@
 from pathlib import Path
+import argparse
 import pandas as pd
 
 from model import model, feature_columns
@@ -6,13 +7,30 @@ from pv_prediction_suite import predict_pv
 
 
 # ------------------------------------------------------------
+# Arguments
+# ------------------------------------------------------------
+
+parser = argparse.ArgumentParser(
+    description="Predict whether an MP ID has PV."
+)
+
+parser.add_argument(
+    "mp_id",
+    type=int,
+    help="MP ID to predict"
+)
+
+args = parser.parse_args()
+
+mp_id = args.mp_id
+
+
+# ------------------------------------------------------------
 # Paths
 # ------------------------------------------------------------
 
-data_root = Path("../../../store/parquet_data/2026")
-
-output_file = Path(
-    "../../../store/parquet_data/pv_predictions_2026_sample_10.parquet"
+data_root = Path(
+    "../../../store/parquet_data/2026"
 )
 
 
@@ -29,52 +47,14 @@ if not files:
         "No parquet files found in the 2026 folder."
     )
 
-print(f"Found {len(files)} parquet files")
-
-
-# ------------------------------------------------------------
-# Pick 10 MP IDs from the first file
-# ------------------------------------------------------------
-
-first_file = files[0]
-
-print()
-print("Using first file:")
-print(first_file)
-
-first_df = pd.read_parquet(
-    first_file,
-    columns=["MP ID"]
+print(
+    f"Looking for MP ID {mp_id} "
+    f"in {len(files)} parquet files..."
 )
 
-first_df["MP ID"] = pd.to_numeric(
-    first_df["MP ID"],
-    errors="coerce"
-).astype("Int64")
-
-sample_mp_ids = (
-    first_df["MP ID"]
-    .dropna()
-    .drop_duplicates()
-    .sample(
-        n=10,
-        #random_state=42
-    )
-    .tolist()
-)
-
-if not sample_mp_ids:
-    raise ValueError(
-        "No valid MP IDs found in the first parquet file."
-    )
-
-print()
-print("Selected MP IDs:")
-print(sample_mp_ids)
-
 
 # ------------------------------------------------------------
-# Load full 2026 history for those 10 MP IDs
+# Load the full 2026 history for this MP ID
 # ------------------------------------------------------------
 
 frames = []
@@ -84,11 +64,9 @@ for file in files:
         df = pd.read_parquet(file)
 
         if "MP ID" not in df.columns:
-            print(f"SKIPPED (no MP ID): {file}")
             continue
 
         if "Datum" not in df.columns:
-            print(f"SKIPPED (no Datum): {file}")
             continue
 
         df["MP ID"] = pd.to_numeric(
@@ -96,103 +74,108 @@ for file in files:
             errors="coerce"
         ).astype("Int64")
 
-        # Keep only the selected 10 MP IDs
-        df = df[
-            df["MP ID"].isin(sample_mp_ids)
+        meter_data = df[
+            df["MP ID"] == mp_id
         ].copy()
 
-        if not df.empty:
-            frames.append(df)
-
-            print(
-                f"Loaded matching rows from: {file} "
-                f"({len(df)} rows)"
+        if not meter_data.empty:
+            frames.append(
+                meter_data
             )
 
     except Exception as e:
-        print(f"FAILED: {file}")
-        print(e)
+        print(
+            f"FAILED reading {file}: {e}"
+        )
 
+
+# ------------------------------------------------------------
+# Check whether the MP ID exists
+# ------------------------------------------------------------
 
 if not frames:
     raise ValueError(
-        "No time-series data found for the selected MP IDs."
+        f"No time-series data found "
+        f"for MP ID {mp_id}"
     )
 
 
 # ------------------------------------------------------------
-# Combine all their 2026 time series
+# Combine all available history
 # ------------------------------------------------------------
 
-sample_timeseries = pd.concat(
+timeseries = pd.concat(
     frames,
     ignore_index=True
 )
 
-print()
-print(
-    "Total rows loaded:",
-    len(sample_timeseries)
-)
 
 print(
-    "Unique MP IDs loaded:",
-    sample_timeseries["MP ID"].nunique()
+    f"Found {len(timeseries)} rows "
+    f"for MP ID {mp_id}"
 )
 
-print()
-print("Rows per MP ID:")
+if "Datum" in timeseries.columns:
 
-print(
-    sample_timeseries
-    .groupby("MP ID")
-    .size()
-)
+    dates = pd.to_datetime(
+        timeseries["Datum"],
+        dayfirst=True,
+        errors="coerce"
+    )
+
+    print(
+        "Date range:",
+        dates.min(),
+        "->",
+        dates.max()
+    )
 
 
 # ------------------------------------------------------------
-# Run predictions
+# Predict PV
 # ------------------------------------------------------------
 
-predictions = predict_pv(
-    raw_timeseries=sample_timeseries,
+prediction = predict_pv(
+    raw_timeseries=timeseries,
     model=model,
     feature_columns=feature_columns,
 )
 
 
 # ------------------------------------------------------------
-# Sort results
+# Extract result
 # ------------------------------------------------------------
 
-predictions = predictions.sort_values(
-    "pv_probability",
-    ascending=False
-).reset_index(drop=True)
+result = prediction.iloc[0]
 
-
-# ------------------------------------------------------------
-# Show predictions
-# ------------------------------------------------------------
-
-print()
-print("PV predictions:")
-
-print(predictions)
-
-
-# ------------------------------------------------------------
-# Save results
-# ------------------------------------------------------------
-
-predictions.to_parquet(
-    output_file,
-    engine="pyarrow",
-    compression="snappy",
-    index=False,
+has_pv = bool(
+    result["has_pv_prediction"]
 )
 
+probability = float(
+    result["pv_probability"]
+)
+
+
+# ------------------------------------------------------------
+# Output
+# ------------------------------------------------------------
+
 print()
+print("------------------------------")
+print("PV PREDICTION")
+print("------------------------------")
+
 print(
-    f"Saved predictions to: {output_file}"
+    f"MP ID:          {mp_id}"
 )
+
+print(
+    f"Has PV:         {has_pv}"
+)
+
+print(
+    f"PV probability: {probability:.2%}"
+)
+
+print("------------------------------")
