@@ -44,7 +44,14 @@ def select_cohort(mapping: pl.DataFrame, labels: pl.DataFrame, cfg: CohortConfig
     labeled_ids = set(labeled["gp_nr"].to_list())
     others = sorted(set(mapping["gp_nr"].to_list()) - labeled_ids)
     count = 0 if cfg.labeled_only else min(cfg.extra_random_gps, len(others))
-    selected = sorted(labeled_ids | set(random.Random(cfg.seed).sample(others, count)))
+    selected_ids = labeled_ids | set(random.Random(cfg.seed).sample(others, count))
+    mapped_ids = set(mapping["gp_nr"].to_list())
+    for gp in cfg.include_gps:
+        if gp in mapped_ids:
+            selected_ids.add(int(gp))
+        else:
+            logger.warning("include_gps: GP %s is not in the MP mapping (Table 4); skipped", gp)
+    selected = sorted(selected_ids)
     cohort = pl.DataFrame({"gp_nr": selected}, schema={"gp_nr": pl.Int64}).with_columns(
         pl.col("gp_nr").is_in(sorted(labeled_ids)).alias("is_labeled")
     )
